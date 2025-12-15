@@ -22,6 +22,9 @@ import associateleadRoutes from "./routes/associateleads.routes.js";
 import corporateleadRoutes from "./routes/corporateleads.routes.js";
 import TechnicalleadRoutes from "./routes/technicalteamleads.routes.js";
 import SolutionsleadRoutes from "./routes/solutionsteamleads.routes.js";
+import contactRoutes from "./routes/omscontact.routes.js";
+import omsCallbackRoutes from "./routes/omsCallback.routes.js";
+
 
 /* ------------------------------ Config ------------------------------ */
 dotenv.config();
@@ -107,6 +110,8 @@ app.use("/api/aleads", associateleadRoutes);
 app.use("/api/cleads", corporateleadRoutes);
 app.use("/api/tleads", TechnicalleadRoutes);
 app.use("/api/sleads", SolutionsleadRoutes);
+app.use("/api/contact", contactRoutes);
+app.use("/api/oms-callback", omsCallbackRoutes);
 
 /* ----------------------------- Error Handler ----------------------------- */
 app.use((err, _req, res, _next) => {
