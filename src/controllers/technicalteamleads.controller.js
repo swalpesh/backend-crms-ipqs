@@ -481,34 +481,77 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
 /* -------------------------- Assign lead (Head) -------------------------- */
 export const assignLeadToEmployee = async (req, res) => {
   try {
-    const { lead_id, assigned_employee, reason } = req.body;
+    const {
+      lead_id,
+      assigned_employee,
+      technical_visit_date,
+      technical_visit_time,
+      technical_visit_priority,
+      technical_visit_type,
+      reason,
+    } = req.body;
+
     const headId = req.user.employee_id;
     const department = "Technical-Team";
 
     if (!lead_id || !assigned_employee) {
-      return res
-        .status(400)
-        .json({ error: "lead_id and assigned_employee are required." });
+      return res.status(400).json({
+        error: "lead_id and assigned_employee are required.",
+      });
     }
 
-    const [existing] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [
-      lead_id,
-    ]);
-    if (existing.length === 0)
+    const [existing] = await pool.query(
+      "SELECT * FROM leads WHERE lead_id = ?",
+      [lead_id]
+    );
+
+    if (existing.length === 0) {
       return res.status(404).json({ error: "Lead not found" });
+    }
 
     const oldLead = existing[0];
 
     await pool.query(
-      "UPDATE leads SET assigned_employee = ?, lead_stage = ?, updated_at = NOW() WHERE lead_id = ?",
-      [assigned_employee, department, lead_id]
+      `
+      UPDATE leads
+      SET 
+        assigned_employee = ?,
+        lead_stage = ?,
+        technical_visit_date = ?,
+        technical_visit_time = ?,
+        technical_visit_priority = ?,
+        technical_visit_type = ?,
+        updated_at = NOW()
+      WHERE lead_id = ?
+      `,
+      [
+        assigned_employee,
+        department,
+        technical_visit_date || null,
+        technical_visit_time || null,
+        technical_visit_priority || null,
+        technical_visit_type || "Specific",
+        lead_id,
+      ]
     );
 
     await pool.query(
-      `INSERT INTO lead_activity_backup 
-       (lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
-        changed_by, changed_by_department, changed_by_role, change_type, reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `
+      INSERT INTO lead_activity_backup
+      (
+        lead_id,
+        old_lead_stage,
+        new_lead_stage,
+        old_assigned_employee,
+        new_assigned_employee,
+        changed_by,
+        changed_by_department,
+        changed_by_role,
+        change_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
       [
         lead_id,
         oldLead.lead_stage,
@@ -518,24 +561,29 @@ export const assignLeadToEmployee = async (req, res) => {
         headId,
         req.user.department_id,
         req.user.role_id,
-        "lead_assigned",
-        reason || "Not provided",
+        "technical_visit_scheduled",
+        reason || "Technical visit scheduled",
       ]
     );
 
     res.status(200).json({
-      message: `Lead ${lead_id} assigned successfully`,
+      message: "Technical visit scheduled successfully",
       lead_id,
       assigned_employee,
-      lead_stage: department,
-      assigned_by: headId,
-      reason: reason || "Not provided",
+      technical_visit_date,
+      technical_visit_time,
+      technical_visit_priority,
+      technical_visit_type,
     });
   } catch (error) {
-    console.error("Error assigning lead:", error);
-    res.status(500).json({ error: "Server error while assigning lead" });
+    console.error("Error scheduling technical visit:", error);
+    res.status(500).json({
+      error: "Server error while scheduling technical visit",
+    });
   }
 };
+
+
 
 /* ------------------------ Get all leads (IpqsHead) ----------------------- */
 export const AssociateMarketingAllLeads = async (req, res) => {
@@ -649,3 +697,5 @@ export const revertLeadToNew = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+
