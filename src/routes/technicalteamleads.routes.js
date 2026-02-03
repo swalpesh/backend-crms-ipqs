@@ -13,6 +13,11 @@ import {
   revertLeadToNew, 
   changeLeadStageByIpqsHead,
   assignLeadToEmployee,
+  getTechnicalTeamVisitDetails,
+  getCompletedTechnicalVisits,
+  startTechnicalVisit,
+  storeVisitStartLocation,
+  rescheduleTechnicalVisit
   // getAllLeadsForIpqsHead,
 } from "../controllers/technicalteamleads.controller.js";
 
@@ -50,6 +55,21 @@ router.get(
   requireRole(["Technical-Team-Head", "IpqsHead"]),
   TechnicalTeamAllLeads
 );
+//get visit details
+router.get(
+  "/technicalteam/visit-details",
+  requireAuth,
+  requireRole(["Technical-Team-Head"]),
+  getTechnicalTeamVisitDetails
+);
+
+//get completed visits
+router.get(
+  "/technicalteam/completed-visits",
+  requireAuth,
+  requireRole(["Technical-Team-Head", "Technical-Team-Employee"]),
+  getCompletedTechnicalVisits
+);
 
 // Change Lead Stage
 router.patch(
@@ -75,6 +95,27 @@ router.patch(
   requireAuth,
   requireRole(["Technical-Team-Head", "Technical-Team-Employee","IpqsHead"]),
   revertLeadToNew
+);
+
+router.patch(
+  "/:id/start-visit",
+  requireAuth,
+  requireRole(["Technical-Team-Head", "Technical-Team-Employee"]),
+  startTechnicalVisit
+);
+
+router.patch(
+  "/:id/visit-location",
+  requireAuth,
+  requireRole(["Technical-Team-Head", "Technical-Team-Employee"]),
+  storeVisitStartLocation
+);
+
+router.patch(
+  "/:id/reschedule",
+  requireAuth,
+  requireRole(["Technical-Team-Head", "Technical-Team-Employee"]),
+  rescheduleTechnicalVisit
 );
 
 export default router;

@@ -272,7 +272,7 @@ export const listLeadsByEmployee = async (req, res) => {
     const params = [employeeId];
 
     if (lead_status) {
-      if (!["new", "follow-up", "lost"].includes(lead_status)) {
+      if (!["new", "follow-up", "lost", "progress", "completed"].includes(lead_status)) {
         return res.status(400).json({ error: "Invalid lead_status value" });
       }
       query += " AND lead_status = ?";
@@ -699,3 +699,321 @@ export const revertLeadToNew = async (req, res) => {
 };
 
 
+/* ------------------ Get Visit Details (Head & Team) ------------------ */
+export const getTechnicalTeamVisitDetails = async (req, res) => {
+  try {
+    const headId = req.user.employee_id;
+    const roleId = req.user.role_id;
+
+    // ✅ Strict check: Only Technical-Team-Head allowed
+    if (roleId !== "Technical-Team-Head") {
+      return res.status(403).json({
+        error: "Forbidden: Only Technical-Team Head can access visit details.",
+      });
+    }
+
+    // ✅ Query: FIX ADDED -> Added "COLLATE utf8mb4_unicode_ci" to the JOIN
+    // This forces the comparison to ignore the database version mismatch
+    const query = `
+      SELECT 
+        l.lead_id,
+        l.company_name, 
+        l.lead_name, 
+        l.technical_visit_date, 
+        l.technical_visit_time, 
+        l.technical_visit_priority, 
+        l.assigned_employee,
+        e.first_name,
+        e.last_name,
+        e.username
+      FROM leads l
+      LEFT JOIN employees e 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Technical-Team'
+      ORDER BY l.technical_visit_date DESC, l.technical_visit_time ASC
+    `;
+
+    const [rows] = await pool.query(query);
+
+    // ✅ Data Segmentation: Split into Head's data and Team's data
+    const headVisits = [];
+    const teamVisits = [];
+
+    for (const row of rows) {
+      // Create a full name string, or fall back to username/Unassigned
+      let assignedPersonName = "Unassigned";
+      
+      if (row.first_name && row.last_name) {
+        assignedPersonName = `${row.first_name} ${row.last_name}`;
+      } else if (row.username) {
+        assignedPersonName = row.username;
+      }
+
+      const visitData = {
+        lead_id: row.lead_id,
+        company_name: row.company_name,
+        lead_name: row.lead_name,
+        visit_date: row.technical_visit_date,
+        visit_time: row.technical_visit_time,
+        visit_priority: row.technical_visit_priority,
+        assigned_person: assignedPersonName,
+        assigned_person_username: row.username || null 
+      };
+
+      // Check if the assigned employee ID matches the Head's ID
+      if (row.assigned_employee === headId) {
+        headVisits.push(visitData);
+      } else {
+        teamVisits.push(visitData);
+      }
+    }
+
+    // ✅ Return response
+    return res.status(200).json({
+      message: "Technical team visit details fetched successfully",
+      total_records: rows.length,
+      head_data: {
+        count: headVisits.length,
+        visits: headVisits,
+      },
+      team_data: {
+        count: teamVisits.length,
+        visits: teamVisits,
+      },
+    });
+  } catch (error) {
+    console.error("Error fetching technical visit details:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Get Completed Technical Visits ---------------- */
+export const getCompletedTechnicalVisits = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // ✅ Allow both Head and Employee of Technical Team
+    const allowedRoles = ["Technical-Team-Head", "Technical-Team-Employee"];
+    
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: Only Technical Team members can access this data.",
+      });
+    }
+
+    // ✅ Query: Fetch all leads where Department is Technical AND Status is Completed
+    // We use lead_visit_department because technical_visit_type is usually 'Specific'/'Flexible'
+    const query = `
+      SELECT * FROM leads 
+      WHERE lead_visit_department = 'Technical' 
+      AND lead_visit_status = 'Completed'
+      ORDER BY updated_at DESC
+    `;
+
+    const [leads] = await pool.query(query);
+
+    // ✅ Attachments: Fetch files for these leads (since you requested "whole data")
+    for (const lead of leads) {
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+    }
+
+    // ✅ Return response
+    return res.status(200).json({
+      message: "Completed technical visits fetched successfully",
+      total: leads.length,
+      leads,
+    });
+  } catch (error) {
+    console.error("Error fetching completed technical visits:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* --------------------------- Start Visit --------------------------- */
+export const startTechnicalVisit = async (req, res) => {
+  try {
+    const { id } = req.params; // lead_id passed in URL
+    const roleId = req.user.role_id;
+    const userId = req.user.employee_id;
+
+    // ✅ Authorization: Only Technical Head & Employee allowed
+    const allowedRoles = ["Technical-Team-Head", "Technical-Team-Employee"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: You are not authorized to start a visit.",
+      });
+    }
+
+    // ✅ Check if lead exists
+    const [lead] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [id]);
+    if (lead.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    // ✅ Update Query: Set lead_visit_status to 'In Progress'
+    // We also log the time when the visit started (optional but recommended)
+    await pool.query(
+      `UPDATE leads 
+       SET lead_status = 'progress', 
+           updated_at = NOW() 
+       WHERE lead_id = ?`,
+      [id]
+    );
+
+    // ✅ Optional: Log this action in history (Good for tracking)
+    await pool.query(
+      `INSERT INTO lead_activity_backup 
+       (lead_id, changed_by, changed_by_role, change_type, reason, change_timestamp)
+       VALUES (?, ?, ?, 'visit_started', 'Technical Visit Started', CURRENT_TIMESTAMP)`,
+      [id, userId, roleId]
+    );
+
+    return res.status(200).json({
+      message: "Visit started successfully.",
+      lead_id: id,
+      lead_visit_status: "In Progress"
+    });
+
+  } catch (error) {
+    console.error("Error starting visit:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* -------------------- Technical Visit Start Location -------------------- */
+export const storeVisitStartLocation = async (req, res) => {
+  try {
+    const { id } = req.params; // lead_id
+    const { location } = req.body; // Expecting location string (e.g., "Lat: 12.34, Long: 56.78" or address)
+    const roleId = req.user.role_id;
+
+    // ✅ Authorization: Technical Head & Employee
+    const allowedRoles = ["Technical-Team-Head", "Technical-Team-Employee"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: You are not authorized to log visit locations.",
+      });
+    }
+
+    // ✅ Validation
+    if (!location) {
+      return res.status(400).json({ error: "Location is required." });
+    }
+
+    // ✅ Check if lead exists
+    const [lead] = await pool.query("SELECT lead_id FROM leads WHERE lead_id = ?", [id]);
+    if (lead.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    // ✅ Update Query
+    await pool.query(
+      `UPDATE leads 
+       SET technical_visit_start_location = ?, 
+           updated_at = NOW() 
+       WHERE lead_id = ?`,
+      [location, id]
+    );
+
+    return res.status(200).json({
+      message: "Visit start location saved successfully.",
+      lead_id: id,
+      location: location
+    });
+
+  } catch (error) {
+    console.error("Error storing visit location:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ------------------------ Reschedule Visit ------------------------ */
+export const rescheduleTechnicalVisit = async (req, res) => {
+  try {
+    const { id } = req.params; // lead_id
+    const { technical_visit_date, technical_visit_time, reason } = req.body;
+    
+    const userId = req.user.employee_id;
+    const roleId = req.user.role_id;
+    const departmentId = req.user.department_id;
+
+    // ✅ Authorization: Technical Head & Employee
+    const allowedRoles = ["Technical-Team-Head", "Technical-Team-Employee"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: You are not authorized to reschedule visits.",
+      });
+    }
+
+    // ✅ Validation
+    if (!technical_visit_date || !technical_visit_time || !reason) {
+      return res.status(400).json({
+        error: "Date, time, and reason are required for rescheduling.",
+      });
+    }
+
+    // ✅ Fetch existing data (to log the "Old" date/time)
+    const [existing] = await pool.query(
+      "SELECT * FROM leads WHERE lead_id = ?",
+      [id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    const oldLead = existing[0];
+    const oldDate = oldLead.technical_visit_date; // Assuming these exist from previous steps
+    const oldTime = oldLead.technical_visit_time;
+
+    // ✅ Update Query: Set new date and time
+    await pool.query(
+      `UPDATE leads 
+       SET technical_visit_date = ?, 
+           technical_visit_time = ?, 
+           lead_visit_status = 'pending',
+           updated_at = NOW() 
+       WHERE lead_id = ?`,
+      [technical_visit_date, technical_visit_time, id]
+    );
+
+    // ✅ Log to lead_activity_backup
+    // We format the reason to include the date change for clarity
+    const detailedReason = `Rescheduled from ${oldDate || "N/A"} ${oldTime || ""} to ${technical_visit_date} ${technical_visit_time}. Reason: ${reason}`;
+
+    await pool.query(
+      `INSERT INTO lead_activity_backup 
+       (lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
+        changed_by, changed_by_department, changed_by_role, change_type, reason, change_timestamp)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)`,
+      [
+        id,
+        oldLead.lead_stage,       // Stage doesn't change
+        oldLead.lead_stage,       // Stage doesn't change
+        oldLead.assigned_employee,// Employee doesn't change
+        oldLead.assigned_employee,// Employee doesn't change
+        userId,
+        departmentId,
+        roleId,
+        "visit_rescheduled",      // Change Type
+        detailedReason            // Combined reason
+      ]
+    );
+
+    return res.status(200).json({
+      message: "Visit rescheduled successfully.",
+      lead_id: id,
+      new_date: technical_visit_date,
+      new_time: technical_visit_time,
+      status: "Pending"
+    });
+
+  } catch (error) {
+    console.error("Error rescheduling visit:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
