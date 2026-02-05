@@ -17,7 +17,11 @@ import {
   getCompletedTechnicalVisits,
   startTechnicalVisit,
   storeVisitStartLocation,
-  rescheduleTechnicalVisit
+  rescheduleTechnicalVisit,
+  completeTechnicalVisit,
+  addInternalMessage,
+  getInternalMessages,
+  TechnicalTeamTodaysVisits
   // getAllLeadsForIpqsHead,
 } from "../controllers/technicalteamleads.controller.js";
 
@@ -48,12 +52,19 @@ router.get("/my-leads", requireAuth, listLeadsByEmployee);
 // Today's Follow-ups
 router.get("/my-leads/today-followups", requireAuth, listTodaysFollowUps);
 
-// Field Marketing All Leads (Head/IpqsHead)
+// Technical Marketing All Leads (Head/IpqsHead)
 router.get(
   "/technicalteam/all-leads",
   requireAuth,
   requireRole(["Technical-Team-Head", "IpqsHead"]),
   TechnicalTeamAllLeads
+);
+
+router.get(
+  "/technicalteam/todays-all-visits",
+  requireAuth,
+  requireRole(["Technical-Team-Head", "IpqsHead"]),
+  TechnicalTeamTodaysVisits
 );
 //get visit details
 router.get(
@@ -116,6 +127,28 @@ router.patch(
   requireAuth,
   requireRole(["Technical-Team-Head", "Technical-Team-Employee"]),
   rescheduleTechnicalVisit
+);
+
+router.patch(
+  "/:id/complete-visit",
+  requireAuth,
+  requireRole(["Technical-Team-Head", "Technical-Team-Employee"]),
+  completeTechnicalVisit
+);
+
+// Post a message (Supports file uploads)
+router.post(
+  "/discussion",
+  requireAuth, 
+  upload.array("attachments", 5), // Allows up to 5 files
+  addInternalMessage
+);
+
+// Get discussion history for a specific lead
+router.get(
+  "/:lead_id/discussion",
+  requireAuth, 
+  getInternalMessages
 );
 
 export default router;

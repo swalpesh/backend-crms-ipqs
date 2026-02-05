@@ -788,32 +788,81 @@ export const getTechnicalTeamVisitDetails = async (req, res) => {
 };
 
 /* ---------------- Get Completed Technical Visits ---------------- */
+/* ---------------- Get Completed Technical Visits (With Employee Info) ---------------- */
 export const getCompletedTechnicalVisits = async (req, res) => {
   try {
     const roleId = req.user.role_id;
+    const employeeId = req.user.employee_id;
 
-    // ✅ Allow both Head and Employee of Technical Team
     const allowedRoles = ["Technical-Team-Head", "Technical-Team-Employee"];
-    
     if (!allowedRoles.includes(roleId)) {
       return res.status(403).json({
         error: "Forbidden: Only Technical Team members can access this data.",
       });
     }
 
-    // ✅ Query: Fetch all leads where Department is Technical AND Status is Completed
-    // We use lead_visit_department because technical_visit_type is usually 'Specific'/'Flexible'
-    const query = `
-      SELECT * FROM leads 
-      WHERE lead_visit_department = 'Technical' 
-      AND lead_visit_status = 'Completed'
-      ORDER BY updated_at DESC
+    let query = "";
+    let params = [];
+
+    // ✅ Shared Logic: We need to JOIN leads -> backup -> employees
+    // This finds the user who performed the 'visit_completed' action
+    const baseJoins = `
+      FROM leads l
+      LEFT JOIN lead_activity_backup lab 
+        ON l.lead_id = lab.lead_id AND lab.change_type = 'visit_completed'
+      LEFT JOIN employees e 
+        ON lab.changed_by COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
     `;
 
-    const [leads] = await pool.query(query);
+    const selectFields = `
+      l.*, 
+      e.employee_id AS completed_by_id, 
+      e.first_name, 
+      e.last_name, 
+      e.username
+    `;
 
-    // ✅ Attachments: Fetch files for these leads (since you requested "whole data")
+    // ✅ CASE 1: HEAD (Sees ALL completed visits)
+    if (roleId === "Technical-Team-Head") {
+      query = `
+        SELECT ${selectFields}
+        ${baseJoins}
+        WHERE l.lead_visit_department = 'Technical' 
+        AND l.lead_visit_status = 'Completed'
+        ORDER BY l.updated_at DESC
+      `;
+    } 
+    
+    // ✅ CASE 2: EMPLOYEE (Sees only visits THEY completed or were assigned to)
+    else {
+      query = `
+        SELECT DISTINCT ${selectFields}
+        ${baseJoins}
+        WHERE l.lead_visit_department = 'Technical' 
+        AND l.lead_visit_status = 'Completed'
+        AND (lab.changed_by = ? OR lab.old_assigned_employee = ?)
+        ORDER BY l.updated_at DESC
+      `;
+      params = [employeeId, employeeId];
+    }
+
+    const [leads] = await pool.query(query, params);
+
+    // ✅ Process results to format names and add attachments
     for (const lead of leads) {
+      // 1. Format the "Completed By" Name
+      if (lead.first_name && lead.last_name) {
+        lead.completed_by_name = `${lead.first_name} ${lead.last_name}`;
+      } else {
+        lead.completed_by_name = lead.username || "Unknown";
+      }
+
+      // Cleanup: Remove raw join fields to keep JSON clean (optional)
+      delete lead.first_name;
+      delete lead.last_name;
+      delete lead.username;
+
+      // 2. Fetch Attachments
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
@@ -821,9 +870,9 @@ export const getCompletedTechnicalVisits = async (req, res) => {
       lead.attachments = attachments;
     }
 
-    // ✅ Return response
     return res.status(200).json({
       message: "Completed technical visits fetched successfully",
+      view_mode: roleId === "Technical-Team-Head" ? "All Team Data" : "Personal History",
       total: leads.length,
       leads,
     });
@@ -1014,6 +1063,249 @@ export const rescheduleTechnicalVisit = async (req, res) => {
 
   } catch (error) {
     console.error("Error rescheduling visit:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+/* ------------------------End Visit ------------------------ */
+export const completeTechnicalVisit = async (req, res) => {
+  try {
+    const { id } = req.params; // lead_id
+    const userId = req.user.employee_id;
+    const roleId = req.user.role_id;
+
+    // ✅ Authorization: Technical Head & Employee
+    const allowedRoles = ["Technical-Team-Head", "Technical-Team-Employee"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: You are not authorized to complete visits.",
+      });
+    }
+
+    // ✅ Check if lead exists
+    const [lead] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [id]);
+    if (lead.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    // ✅ Update Query: Set Status to 'Completed' and record current time
+    await pool.query(
+      `UPDATE leads 
+       SET lead_visit_status = 'Completed',
+            lead_visit_department = 'Technical',
+            lead_status = 'completed',
+           technical_visit_complete_time = NOW(),
+           updated_at = NOW() 
+       WHERE lead_id = ?`,
+      [id]
+    );
+
+    // ✅ Log to lead_activity_backup
+    await pool.query(
+      `INSERT INTO lead_activity_backup 
+       (lead_id, changed_by, changed_by_role, change_type, reason, change_timestamp)
+       VALUES (?, ?, ?, 'visit_completed', 'Technical Visit Marked as Completed', CURRENT_TIMESTAMP)`,
+      [id, userId, roleId]
+    );
+
+    return res.status(200).json({
+      message: "Visit marked as completed successfully.",
+      lead_id: id,
+      status: "Completed",
+      completed_at: new Date() // Returns current server time
+    });
+
+  } catch (error) {
+    console.error("Error completing visit:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* -------------------- Internal Discussion: Add Message -------------------- */
+export const addInternalMessage = async (req, res) => {
+  try {
+    const { lead_id, message } = req.body;
+    const userId = req.user.employee_id;
+
+    // ✅ Validation: Must have at least a message OR a file
+    if (!lead_id) {
+      return res.status(400).json({ error: "Lead ID is required." });
+    }
+    if (!message && (!req.files || req.files.length === 0)) {
+      return res.status(400).json({ error: "Message or attachment is required." });
+    }
+
+    // ✅ Check if lead exists
+    const [lead] = await pool.query("SELECT lead_id FROM leads WHERE lead_id = ?", [lead_id]);
+    if (lead.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    // ✅ Step 1: Insert Message
+    const [result] = await pool.query(
+      `INSERT INTO lead_discussions (lead_id, created_by, message, created_at) 
+       VALUES (?, ?, ?, NOW())`,
+      [lead_id, userId, message || ""]
+    );
+
+    const discussionId = result.insertId;
+
+    // ✅ Step 2: Insert Attachments (if any)
+    const attachments = [];
+    if (req.files && req.files.length > 0) {
+      for (const file of req.files) {
+        await pool.query(
+          `INSERT INTO lead_discussion_attachments (discussion_id, file_name, file_path) 
+           VALUES (?, ?, ?)`,
+          [discussionId, file.originalname, file.path]
+        );
+        attachments.push({ file_name: file.originalname, file_path: file.path });
+      }
+    }
+
+    res.status(201).json({
+      message: "Message posted successfully.",
+      discussion_id: discussionId,
+      lead_id,
+      created_by: userId,
+      message,
+      attachments,
+      created_at: new Date()
+    });
+
+  } catch (error) {
+    console.error("Error posting internal message:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* -------------------- Internal Discussion: Get Messages -------------------- */
+export const getInternalMessages = async (req, res) => {
+  try {
+    const { lead_id } = req.params;
+
+    // ✅ 1. Get all messages for this lead + Join with Employees to get names
+    // Note: Added 'COLLATE' to the JOIN to prevent "Illegal mix of collations" error
+    const [messages] = await pool.query(
+      `SELECT 
+         d.id AS discussion_id, 
+         d.lead_id, 
+         d.message, 
+         d.created_at, 
+         d.created_by AS employee_id,
+         e.first_name, 
+         e.last_name, 
+         e.username,
+         e.role_id,
+         e.photo  
+       FROM lead_discussions d
+       LEFT JOIN employees e 
+         ON d.created_by COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+       WHERE d.lead_id = ?
+       ORDER BY d.created_at ASC`, 
+      [lead_id]
+    );
+
+    // ✅ 2. Get attachments for these messages
+    for (const msg of messages) {
+      const [files] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_discussion_attachments WHERE discussion_id = ?",
+        [msg.discussion_id]
+      );
+      msg.attachments = files;
+      
+      // Format the author name neatly
+      msg.author_name = (msg.first_name && msg.last_name) 
+        ? `${msg.first_name} ${msg.last_name}` 
+        : msg.username;
+    }
+
+    res.status(200).json({
+      message: "Discussion history fetched successfully",
+      total_messages: messages.length,
+      data: messages
+    });
+
+  } catch (error) {
+    console.error("Error fetching discussion:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Today's Technical Visits (All Employees) ---------------- */
+export const TechnicalTeamTodaysVisits = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // ✅ Allow only Technical-Team-Head or IpqsHead
+    if (!["Technical-Team-Head", "IpqsHead"].includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: Only Technical-Team Head or IpqsHead can access this.",
+      });
+    }
+
+    // ✅ Fetch employees in Technical-Team
+    const [employees] = await pool.query(
+      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Technical-Team'"
+    );
+
+    const data = { employees: [], unassigned_leads: [] };
+
+    // ✅ 1. Get Today's Visits for each Employee
+    for (const emp of employees) {
+      const [leads] = await pool.query(
+        `SELECT * FROM leads 
+         WHERE assigned_employee = ? 
+         AND lead_stage = 'Technical-Team' 
+         AND technical_visit_date = CURDATE() 
+         ORDER BY technical_visit_time ASC`,
+        [emp.employee_id]
+      );
+
+      for (const lead of leads) {
+        const [attachments] = await pool.query(
+          "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+          [lead.lead_id]
+        );
+        lead.attachments = attachments;
+      }
+
+      // Only push employee if they actually have visits today (Optional - typically Heads want to see everyone)
+      // Currently pushing everyone, with 0 leads if they have none.
+      data.employees.push({ ...emp, total_todays_visits: leads.length, leads });
+    }
+
+    // ✅ 2. Get Today's Unassigned Visits (Rare, but possible)
+    const [unassigned] = await pool.query(
+      `SELECT * FROM leads 
+       WHERE assigned_employee = '0' 
+       AND lead_stage = 'Technical-Team' 
+       AND technical_visit_date = CURDATE()
+       ORDER BY technical_visit_time ASC`
+    );
+
+    for (const lead of unassigned) {
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+    }
+
+    data.unassigned_leads = unassigned;
+
+    res.status(200).json({
+      message: "Today's Technical-Team visits fetched successfully",
+      date: new Date().toISOString().split('T')[0], // Shows current date YYYY-MM-DD
+      accessed_by: roleId,
+      department: "Technical-Team",
+      total_employees: data.employees.length,
+      total_unassigned_todays_visits: data.unassigned_leads.length,
+      ...data,
+    });
+  } catch (error) {
+    console.error("Error fetching Today's Technical-Team visits:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
