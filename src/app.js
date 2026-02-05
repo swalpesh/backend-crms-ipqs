@@ -24,6 +24,8 @@ import TechnicalleadRoutes from "./routes/technicalteamleads.routes.js";
 import SolutionsleadRoutes from "./routes/solutionsteamleads.routes.js";
 import contactRoutes from "./routes/omscontact.routes.js";
 import omsCallbackRoutes from "./routes/omsCallback.routes.js";
+import reimbursementRoutes from "./routes/reimbursements.routes.js";
+import notificationRoutes from "./routes/notifications.routes.js";
 
 
 /* ------------------------------ Config ------------------------------ */
@@ -112,6 +114,8 @@ app.use("/api/tleads", TechnicalleadRoutes);
 app.use("/api/sleads", SolutionsleadRoutes);
 app.use("/api/contact", contactRoutes);
 app.use("/api/oms-callback", omsCallbackRoutes);
+app.use("/api/reimbursements", reimbursementRoutes);
+app.use("/api/notifications", notificationRoutes);
 
 /* ----------------------------- Error Handler ----------------------------- */
 app.use((err, _req, res, _next) => {
