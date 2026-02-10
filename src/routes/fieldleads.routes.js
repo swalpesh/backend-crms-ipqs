@@ -12,7 +12,8 @@ import {
   revertLeadToNew, 
   fieldMarketingAllLeads,
   changeLeadStageByIpqsHead,
-  assignLeadToEmployee,
+  assignLeadToFieldEmployee,
+  getFieldMarketingVisitDetails,
   getAllLeadsForIpqsHead,
 } from "../controllers/fieldleads.controller.js";
 
@@ -22,11 +23,21 @@ const router = express.Router();
 router.post(
   "/",
   requireAuth,
-  requireRole(["Field-Marketing-Head", "Field-Marketing-Employee", "IpqsHead"]),
+  // ⚠️ Check: Ensure these roles match your file context (e.g., Technical-Team vs Field-Marketing)
+  requireRole(["Field-Marketing-Head", "Field-Marketing-Employee", "IpqsHead"]), 
   upload.array("attachments", 10),
   [
+    // Existing validators
     body("lead_name").notEmpty().withMessage("Lead name is required"),
-    body("lead_status").isIn(["new", "follow-up", "lost"]).withMessage("Invalid lead status"),
+    body("lead_status").isIn(["new", "follow-up", "lost", "progress", "completed"]).withMessage("Invalid lead status"),
+
+    // ✅ NEW VALIDATORS for the new fields
+    body("lead_priority").optional().isIn(["High", "Medium", "Low"]).withMessage("Priority must be High, Medium, or Low"),
+    body("expected_revenue").optional().isFloat({ min: 0 }).withMessage("Revenue must be a positive number"),
+    body("probability").optional().isInt({ min: 0, max: 100 }).withMessage("Probability must be between 0 and 100"),
+    body("mark_as_hot_lead").optional().isBoolean().withMessage("Hot Lead must be true or false"),
+    // body("expected_closing_date").optional().isISO8601().toDate().withMessage("Invalid date format for closing date"),
+    body("lead_type").optional().isString().withMessage("Lead Type must be a string"),
   ],
   createLead
 );
@@ -63,8 +74,16 @@ router.patch(
 router.patch(
   "/assign",
   requireAuth,
-  requireRole(["Field-Marketing-Head", "IpqsHead"]),
-  assignLeadToEmployee
+  requireRole(["Field-Marketing-Head", "Field-Marketing-Employee", "IpqsHead"]),
+  assignLeadToFieldEmployee
+);
+
+//get field visit details
+router.get(
+  "/fieldmarketing/visit-details",
+  requireAuth,
+  requireRole(["Field-Marketing-Head"]),
+  getFieldMarketingVisitDetails
 );
 
 // All Leads (IpqsHead)

@@ -60,19 +60,40 @@ export const createLead = async (req, res) => {
       follow_up_date,
       follow_up_time,
       lead_stage,
+      
+      // ✅ New Fields
+      lead_type,
+      lead_priority,
+      expected_closing_date,
+      expected_revenue,
+      probability,
+      mark_as_hot_lead
     } = req.body;
 
     const lead_id = await generateLeadId();
     const created_by = req.user.employee_id;
 
-    // ✅ Insert into leads table
+    // ✅ 1. Insert new lead
     await pool.query(
       `INSERT INTO leads 
-      (lead_id, lead_name, company_name, contact_person_name, contact_person_phone, contact_person_email,
-       company_contact_number, company_email, company_website, company_address, company_country, company_state, company_city, zipcode,
-       industry_type, lead_requirement, notes, status, assigned_employee, created_by, lead_status,
-       follow_up_reason, follow_up_date, follow_up_time, lead_stage)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?,?,?,?)`,
+      (
+        lead_id, lead_name, company_name, contact_person_name, contact_person_phone, contact_person_email,
+        company_contact_number, company_email, company_website, company_address, company_country, company_state, company_city, zipcode,
+        industry_type, lead_requirement, notes, status, assigned_employee, created_by, lead_status,
+        follow_up_reason, follow_up_date, follow_up_time, lead_stage,
+        
+        /* New Columns */
+        lead_type, lead_priority, expected_closing_date, expected_revenue, probability, mark_as_hot_lead
+      )
+      VALUES (
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, 'active', ?, ?, ?,
+        ?, ?, ?, ?,
+        
+        /* New Values */
+        ?, ?, ?, ?, ?, ?
+      )`,
       [
         lead_id,
         lead_name,
@@ -91,30 +112,37 @@ export const createLead = async (req, res) => {
         industry_type,
         lead_requirement,
         notes,
-        assigned_employee || "0",
+        assigned_employee || "0", // Default to "0" (Unassigned) if empty
         created_by,
         lead_status || "new",
+        
+        // Follow-up logic
         lead_status === "follow-up" ? follow_up_reason : null,
         lead_status === "follow-up" ? follow_up_date : null,
         lead_status === "follow-up" ? follow_up_time : null,
-        lead_stage || "Associate-Marketing",
+        
+        lead_stage || "Field-Marketing",
+
+        // ✅ New Fields Data
+        lead_type || null,
+        lead_priority || "Medium", // Default to Medium if not provided
+        expected_closing_date || null,
+        expected_revenue || 0.00,
+        probability || 0,
+        mark_as_hot_lead ? 1 : 0 // Ensure Boolean is stored as 1 or 0
       ]
     );
 
-    // ✅ Log "New Lead Created" activity in lead_activity_backup
+    // ✅ 2. Log activity in lead_activity_backup
     await pool.query(
       `INSERT INTO lead_activity_backup 
       (lead_id, new_lead_stage, new_assigned_employee, reason, change_timestamp)
       VALUES (?, ?, ?, 'New Lead Created', CURRENT_TIMESTAMP)`,
-      [
-        lead_id,
-        lead_stage || "Associate-Marketing",
-        assigned_employee || "0"
-      ]
+      [lead_id, lead_stage || "Technical-Team", assigned_employee || "0"]
     );
 
-    // ✅ Handle attachments (if any)
-    if (req.files?.length > 0) {
+    // ✅ 3. Handle attachments (optional)
+    if (req.files && req.files.length > 0) {
       for (const file of req.files) {
         await pool.query(
           "INSERT INTO lead_attachments (lead_id, file_name, file_path) VALUES (?,?,?)",
@@ -123,9 +151,10 @@ export const createLead = async (req, res) => {
       }
     }
 
-    return res.status(201).json({
-      message: "Lead created successfully",
-      lead_id,
+    // ✅ 4. Return response
+    return res.status(201).json({ 
+      message: "Lead created successfully", 
+      lead_id 
     });
 
   } catch (error) {
@@ -265,40 +294,80 @@ export const updateLeadStatus = async (req, res) => {
   }
 };
 
-/* ----------------------- My Leads (Associate Employee) ------------------ */
 export const listLeadsByEmployee = async (req, res) => {
   try {
     const employeeId = req.user.employee_id;
     const { lead_status } = req.query;
 
-    let query =
-      "SELECT * FROM leads WHERE assigned_employee = ? AND lead_stage = 'Associate-Marketing'";
+    // ✅ Base Query: Select Lead + Join Employee Table twice (for Assigned & Creator)
+    // We use aliases 'assignee' and 'creator' to distinguish between the two joins.
+    let query = `
+      SELECT 
+        l.*,
+        CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
+        assignee.username AS assigned_employee_username,
+        CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
+        creator.username AS created_by_username
+      FROM leads l
+      LEFT JOIN employees assignee 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN employees creator 
+        ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.assigned_employee = ? 
+      AND l.lead_stage = 'Associate-Marketing'
+    `;
+
     const params = [employeeId];
 
+    // ✅ Filter by Lead Status (if provided)
     if (lead_status) {
-      if (!["new", "follow-up", "lost"].includes(lead_status)) {
+      if (!["new", "follow-up", "lost", "progress", "completed"].includes(lead_status)) {
         return res.status(400).json({ error: "Invalid lead_status value" });
       }
-      query += " AND lead_status = ?";
+      query += " AND l.lead_status = ?";
       params.push(lead_status);
     }
 
+    // ✅ Order by newest first
+    query += " ORDER BY l.created_at DESC";
+
     const [leads] = await pool.query(query, params);
 
+    // ✅ Calculate Counts
+    let hotLeadsCount = 0;
+
+    // ✅ Process Leads (Add Attachments & Count Hot Leads)
     for (const lead of leads) {
+      // Count if it's a hot lead (ensure boolean check works for 1/0/true/false)
+      if (lead.mark_as_hot_lead === 1 || lead.mark_as_hot_lead === true) {
+        hotLeadsCount++;
+      }
+
+      // Fetch Attachments
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
       );
       lead.attachments = attachments;
+
+      // Fallback: If name is null (e.g., deleted employee), use username or "Unknown"
+      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
+      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
+      
+      // Remove raw username fields to keep JSON clean (optional)
+      delete lead.assigned_employee_username;
+      delete lead.created_by_username;
     }
 
-    res.status(200).json({
+    // ✅ Return Response
+    return res.status(200).json({
       message: "Leads fetched successfully",
-      employee: employeeId,
-      total: leads.length,
+      employee_id: employeeId,
+      total_leads: leads.length,
+      hot_leads_count: hotLeadsCount,
       leads,
     });
+
   } catch (error) {
     console.error("Error fetching employee leads:", error);
     res.status(500).json({ error: "Server error" });
@@ -344,69 +413,42 @@ export const listTodaysFollowUps = async (req, res) => {
 /* ------------- Associate-Marketing employees & leads (Head / IpqsHead) -- */
 export const AssociateMarketingAllLeads = async (req, res) => {
   try {
-    const roleId = req.user.role_id;
+    // if (!(isFieldHead(req.user) || isIpqsHead(req.user))) {
+    //   return res.status(403).json({
+    //     error: "Forbidden: Only Associate-Marketing Head or IpqsHead can access this.",
+    //   });
+    // }
 
-    // ✅ Allow only Associate-Marketing-Head or IpqsHead to access
-    if (!["Associate-Marketing-Head", "IpqsHead"].includes(roleId)) {
-      return res.status(403).json({
-        error: "Forbidden: Only Associate-Marketing Head or IpqsHead can access this.",
-      });
-    }
-
-    // ✅ Fetch all Associate-Marketing employees (including Head, tolerate typo)
     const [employees] = await pool.query(
-      `SELECT employee_id, username, email, role_id, department_id 
-       FROM employees 
-       WHERE (
-         LOWER(department_id) IN ('associate-marketing', 'assoicate-marketing')
-         OR role_id = 'Associate-Marketing-Head'
-       )
-       AND role_id IN ('Associate-Marketing-Employee', 'Associate-Marketing-Head')
-       ORDER BY role_id DESC, username ASC`
+      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Assoicate-Marketing'"
     );
 
     const data = { employees: [], unassigned_leads: [] };
 
-    // ✅ For each employee, fetch their leads + attachments
     for (const emp of employees) {
       const [leads] = await pool.query(
-        `SELECT * FROM leads 
-         WHERE assigned_employee = ? 
-         AND lead_stage = 'Associate-Marketing'
-         ORDER BY created_at DESC`,
+        "SELECT * FROM leads WHERE assigned_employee = ? AND lead_stage = 'Associate-Marketing'",
         [emp.employee_id]
       );
 
       for (const lead of leads) {
         const [attachments] = await pool.query(
-          `SELECT id, file_name, file_path 
-           FROM lead_attachments 
-           WHERE lead_id = ?`,
+          "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
           [lead.lead_id]
         );
         lead.attachments = attachments;
       }
 
-      data.employees.push({
-        ...emp,
-        total_leads: leads.length,
-        leads,
-      });
+      data.employees.push({ ...emp, leads });
     }
 
-    // ✅ Fetch unassigned leads in Associate-Marketing stage
     const [unassigned] = await pool.query(
-      `SELECT * FROM leads 
-       WHERE assigned_employee = '0' 
-       AND lead_stage = 'Associate-Marketing'
-       ORDER BY created_at DESC`
+      "SELECT * FROM leads WHERE assigned_employee = '0' AND lead_stage = 'Associate-Marketing'"
     );
 
     for (const lead of unassigned) {
       const [attachments] = await pool.query(
-        `SELECT id, file_name, file_path 
-         FROM lead_attachments 
-         WHERE lead_id = ?`,
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
       );
       lead.attachments = attachments;
@@ -414,10 +456,8 @@ export const AssociateMarketingAllLeads = async (req, res) => {
 
     data.unassigned_leads = unassigned;
 
-    // ✅ Final response
     res.status(200).json({
-      message: "Associate-Marketing employees, head, and their leads fetched successfully",
-      accessed_by: roleId,
+      message: "Associate-Marketing employees and their leads fetched successfully",
       department: "Associate-Marketing",
       total_employees: data.employees.length,
       total_unassigned_leads: data.unassigned_leads.length,
@@ -505,37 +545,85 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
   }
 };
 
-/* -------------------------- Assign lead (Head) -------------------------- */
-export const assignLeadToEmployee = async (req, res) => {
+/* -------------------------- Assign lead to Lead (Head & Employee both) -------------------------- */
+export const assignLeadToAssociateEmployee = async (req, res) => {
   try {
-    const { lead_id, assigned_employee, reason } = req.body;
+    const {
+      lead_id,
+      assigned_employee,
+      associate_visit_date,
+      associate_visit_time,
+      associate_visit_priority,
+      associate_visit_type,
+      reason,
+    } = req.body;
+
     const headId = req.user.employee_id;
     const department = "Associate-Marketing";
 
+    // ✅ Validation
     if (!lead_id || !assigned_employee) {
-      return res
-        .status(400)
-        .json({ error: "lead_id and assigned_employee are required." });
+      return res.status(400).json({
+        error: "lead_id and assigned_employee are required.",
+      });
     }
 
-    const [existing] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [
-      lead_id,
-    ]);
-    if (existing.length === 0)
+    // ✅ Check if Lead Exists
+    const [existing] = await pool.query(
+      "SELECT * FROM leads WHERE lead_id = ?",
+      [lead_id]
+    );
+
+    if (existing.length === 0) {
       return res.status(404).json({ error: "Lead not found" });
+    }
 
     const oldLead = existing[0];
 
+    // ✅ Update Lead with Field Marketing Details
     await pool.query(
-      "UPDATE leads SET assigned_employee = ?, lead_stage = ?, updated_at = NOW() WHERE lead_id = ?",
-      [assigned_employee, department, lead_id]
+      `
+      UPDATE leads
+      SET 
+        assigned_employee = ?,
+        lead_stage = ?,
+        associate_visit_date = ?,
+        associate_visit_time = ?,
+        associate_visit_priority = ?,
+        associate_visit_type = ?,
+        associate_visit_status = 'Pending',
+        updated_at = NOW()
+      WHERE lead_id = ?
+      `,
+      [
+        assigned_employee,
+        department, // Sets stage to 'Field-Marketing'
+        associate_visit_date || null,
+        associate_visit_time || null,
+        associate_visit_priority || "Medium",
+        associate_visit_type || "Specific",
+        lead_id,
+      ]
     );
 
+    // ✅ Log Activity in Backup Table
     await pool.query(
-      `INSERT INTO lead_activity_backup 
-       (lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
-        changed_by, changed_by_department, changed_by_role, change_type, reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `
+      INSERT INTO lead_activity_backup
+      (
+        lead_id,
+        old_lead_stage,
+        new_lead_stage,
+        old_assigned_employee,
+        new_assigned_employee,
+        changed_by,
+        changed_by_department,
+        changed_by_role,
+        change_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
       [
         lead_id,
         oldLead.lead_stage,
@@ -545,22 +633,25 @@ export const assignLeadToEmployee = async (req, res) => {
         headId,
         req.user.department_id,
         req.user.role_id,
-        "lead_assigned",
-        reason || "Not provided",
+        "associate_visit_scheduled", // Specific change type
+        reason || "Associate Marketing visit scheduled",
       ]
     );
 
     res.status(200).json({
-      message: `Lead ${lead_id} assigned successfully`,
+      message: "Associate Marketing visit scheduled successfully",
       lead_id,
       assigned_employee,
-      lead_stage: department,
-      assigned_by: headId,
-      reason: reason || "Not provided",
+      associate_visit_date,
+      associate_visit_time,
+      associate_visit_priority,
+      associate_visit_type,
     });
   } catch (error) {
-    console.error("Error assigning lead:", error);
-    res.status(500).json({ error: "Server error while assigning lead" });
+    console.error("Error scheduling associate visit:", error);
+    res.status(500).json({
+      error: "Server error while scheduling associate visit",
+    });
   }
 };
 

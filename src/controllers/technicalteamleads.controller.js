@@ -788,7 +788,7 @@ export const getTechnicalTeamVisitDetails = async (req, res) => {
 };
 
 /* ---------------- Get Completed Technical Visits ---------------- */
-/* ---------------- Get Completed Technical Visits (With Employee Info) ---------------- */
+
 export const getCompletedTechnicalVisits = async (req, res) => {
   try {
     const roleId = req.user.role_id;

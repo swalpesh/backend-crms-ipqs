@@ -21,7 +21,7 @@ async function generateLeadId() {
 export const createLead = async (req, res) => {
   try {
     const errors = validationResult(req);
-    if (!errors.isEmpty()) 
+    if (!errors.isEmpty())
       return res.status(400).json({ errors: errors.array() });
 
     const {
@@ -47,6 +47,14 @@ export const createLead = async (req, res) => {
       follow_up_date,
       follow_up_time,
       lead_stage,
+      
+      // ✅ New Fields
+      lead_type,
+      lead_priority,
+      expected_closing_date,
+      expected_revenue,
+      probability,
+      mark_as_hot_lead
     } = req.body;
 
     const lead_id = await generateLeadId();
@@ -55,11 +63,24 @@ export const createLead = async (req, res) => {
     // ✅ 1. Insert new lead
     await pool.query(
       `INSERT INTO leads 
-      (lead_id, lead_name, company_name, contact_person_name, contact_person_phone, contact_person_email,
-       company_contact_number, company_email, company_website, company_address, company_country, company_state, company_city, zipcode,
-       industry_type, lead_requirement, notes, status, assigned_employee, created_by, lead_status,
-       follow_up_reason, follow_up_date, follow_up_time, lead_stage)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,'active',?,?,?,?,?,?,?)`,
+      (
+        lead_id, lead_name, company_name, contact_person_name, contact_person_phone, contact_person_email,
+        company_contact_number, company_email, company_website, company_address, company_country, company_state, company_city, zipcode,
+        industry_type, lead_requirement, notes, status, assigned_employee, created_by, lead_status,
+        follow_up_reason, follow_up_date, follow_up_time, lead_stage,
+        
+        /* New Columns */
+        lead_type, lead_priority, expected_closing_date, expected_revenue, probability, mark_as_hot_lead
+      )
+      VALUES (
+        ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, ?, ?, ?, ?, ?,
+        ?, ?, ?, 'active', ?, ?, ?,
+        ?, ?, ?, ?,
+        
+        /* New Values */
+        ?, ?, ?, ?, ?, ?
+      )`,
       [
         lead_id,
         lead_name,
@@ -78,13 +99,24 @@ export const createLead = async (req, res) => {
         industry_type,
         lead_requirement,
         notes,
-        assigned_employee,
+        assigned_employee || "0", // Default to "0" (Unassigned) if empty
         created_by,
-        lead_status,
+        lead_status || "new",
+        
+        // Follow-up logic
         lead_status === "follow-up" ? follow_up_reason : null,
         lead_status === "follow-up" ? follow_up_date : null,
         lead_status === "follow-up" ? follow_up_time : null,
-        lead_stage,
+        
+        lead_stage || "Field-Marketing",
+
+        // ✅ New Fields Data
+        lead_type || null,
+        lead_priority || "Medium", // Default to Medium if not provided
+        expected_closing_date || null,
+        expected_revenue || 0.00,
+        probability || 0,
+        mark_as_hot_lead ? 1 : 0 // Ensure Boolean is stored as 1 or 0
       ]
     );
 
@@ -93,7 +125,7 @@ export const createLead = async (req, res) => {
       `INSERT INTO lead_activity_backup 
       (lead_id, new_lead_stage, new_assigned_employee, reason, change_timestamp)
       VALUES (?, ?, ?, 'New Lead Created', CURRENT_TIMESTAMP)`,
-      [lead_id, lead_stage, assigned_employee]
+      [lead_id, lead_stage || "Field-Marketing", assigned_employee || "0"]
     );
 
     // ✅ 3. Handle attachments (optional)
@@ -106,7 +138,7 @@ export const createLead = async (req, res) => {
       }
     }
 
-    // ✅ 4. Response
+    // ✅ 4. Return response
     return res.status(201).json({ 
       message: "Lead created successfully", 
       lead_id 
@@ -248,38 +280,81 @@ export const updateLeadStatus = async (req, res) => {
 
 
 /* ------------------------- My Field leads (self) ------------------------- */
+/* ---------------- List Leads by Employee (With Names & Counts) ---------------- */
 export const listLeadsByEmployee = async (req, res) => {
   try {
     const employeeId = req.user.employee_id;
     const { lead_status } = req.query;
 
-    let query = "SELECT * FROM leads WHERE assigned_employee = ? AND lead_stage = ?";
-    const params = [employeeId, "Field-Marketing"];
+    // ✅ Base Query: Select Lead + Join Employee Table twice (for Assigned & Creator)
+    // We use aliases 'assignee' and 'creator' to distinguish between the two joins.
+    let query = `
+      SELECT 
+        l.*,
+        CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
+        assignee.username AS assigned_employee_username,
+        CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
+        creator.username AS created_by_username
+      FROM leads l
+      LEFT JOIN employees assignee 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN employees creator 
+        ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.assigned_employee = ? 
+      AND l.lead_stage = 'Field-Marketing'
+    `;
 
+    const params = [employeeId];
+
+    // ✅ Filter by Lead Status (if provided)
     if (lead_status) {
-      if (!["new", "follow-up", "lost"].includes(lead_status)) {
+      if (!["new", "follow-up", "lost", "progress", "completed"].includes(lead_status)) {
         return res.status(400).json({ error: "Invalid lead_status value" });
       }
-      query += " AND lead_status = ?";
+      query += " AND l.lead_status = ?";
       params.push(lead_status);
     }
 
+    // ✅ Order by newest first
+    query += " ORDER BY l.created_at DESC";
+
     const [leads] = await pool.query(query, params);
 
+    // ✅ Calculate Counts
+    let hotLeadsCount = 0;
+
+    // ✅ Process Leads (Add Attachments & Count Hot Leads)
     for (const lead of leads) {
+      // Count if it's a hot lead (ensure boolean check works for 1/0/true/false)
+      if (lead.mark_as_hot_lead === 1 || lead.mark_as_hot_lead === true) {
+        hotLeadsCount++;
+      }
+
+      // Fetch Attachments
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
       );
       lead.attachments = attachments;
+
+      // Fallback: If name is null (e.g., deleted employee), use username or "Unknown"
+      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
+      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
+      
+      // Remove raw username fields to keep JSON clean (optional)
+      delete lead.assigned_employee_username;
+      delete lead.created_by_username;
     }
 
+    // ✅ Return Response
     return res.status(200).json({
       message: "Leads fetched successfully",
-      employee: employeeId,
-      total: leads.length,
+      employee_id: employeeId,
+      total_leads: leads.length,
+      hot_leads_count: hotLeadsCount,
       leads,
     });
+
   } catch (error) {
     console.error("Error fetching employee leads:", error);
     res.status(500).json({ error: "Server error" });
@@ -452,37 +527,204 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
   }
 };
 
-/* -------------------------- Assign lead (Head) -------------------------- */
-export const assignLeadToEmployee = async (req, res) => {
+/* -------------------------- Assign lead to Lead (Head & Employee both) -------------------------- */
+export const assignLeadToFieldEmployee = async (req, res) => {
   try {
-    const { lead_id, assigned_employee } = req.body;
+    const {
+      lead_id,
+      assigned_employee,
+      field_visit_date,
+      field_visit_time,
+      field_visit_priority,
+      field_visit_type,
+      reason,
+    } = req.body;
+
     const headId = req.user.employee_id;
     const department = "Field-Marketing";
 
+    // ✅ Validation
     if (!lead_id || !assigned_employee) {
-      return res.status(400).json({ error: "lead_id and assigned_employee are required." });
+      return res.status(400).json({
+        error: "lead_id and assigned_employee are required.",
+      });
     }
 
-    const [existing] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [lead_id]);
+    // ✅ Check if Lead Exists
+    const [existing] = await pool.query(
+      "SELECT * FROM leads WHERE lead_id = ?",
+      [lead_id]
+    );
+
     if (existing.length === 0) {
       return res.status(404).json({ error: "Lead not found" });
     }
 
+    const oldLead = existing[0];
+
+    // ✅ Update Lead with Field Marketing Details
     await pool.query(
-      "UPDATE leads SET assigned_employee = ?, lead_stage = ?, updated_at = NOW() WHERE lead_id = ?",
-      [assigned_employee, department, lead_id]
+      `
+      UPDATE leads
+      SET 
+        assigned_employee = ?,
+        lead_stage = ?,
+        field_visit_date = ?,
+        field_visit_time = ?,
+        field_visit_priority = ?,
+        field_visit_type = ?,
+        field_visit_status = 'Pending',
+        updated_at = NOW()
+      WHERE lead_id = ?
+      `,
+      [
+        assigned_employee,
+        department, // Sets stage to 'Field-Marketing'
+        field_visit_date || null,
+        field_visit_time || null,
+        field_visit_priority || "Medium",
+        field_visit_type || "Specific",
+        lead_id,
+      ]
     );
 
-    return res.status(200).json({
-      message: `Lead ${lead_id} assigned successfully`,
+    // ✅ Log Activity in Backup Table
+    await pool.query(
+      `
+      INSERT INTO lead_activity_backup
+      (
+        lead_id,
+        old_lead_stage,
+        new_lead_stage,
+        old_assigned_employee,
+        new_assigned_employee,
+        changed_by,
+        changed_by_department,
+        changed_by_role,
+        change_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        lead_id,
+        oldLead.lead_stage,
+        department,
+        oldLead.assigned_employee,
+        assigned_employee,
+        headId,
+        req.user.department_id,
+        req.user.role_id,
+        "field_visit_scheduled", // Specific change type
+        reason || "Field Marketing visit scheduled",
+      ]
+    );
+
+    res.status(200).json({
+      message: "Field Marketing visit scheduled successfully",
       lead_id,
       assigned_employee,
-      lead_stage: department,
-      assigned_by: headId,
+      field_visit_date,
+      field_visit_time,
+      field_visit_priority,
+      field_visit_type,
     });
   } catch (error) {
-    console.error("Error assigning lead:", error);
-    res.status(500).json({ error: "Server error while assigning lead" });
+    console.error("Error scheduling field visit:", error);
+    res.status(500).json({
+      error: "Server error while scheduling field visit",
+    });
+  }
+};
+
+/* ------------------ Get Field Visit Details (Head & Team) ------------------ */
+export const getFieldMarketingVisitDetails = async (req, res) => {
+  try {
+    const headId = req.user.employee_id;
+    const roleId = req.user.role_id;
+
+    // ✅ Strict check: Only Field-Marketing-Head allowed
+    if (roleId !== "Field-Marketing-Head") {
+      return res.status(403).json({
+        error: "Forbidden: Only Field-Marketing Head can access visit details.",
+      });
+    }
+
+    // ✅ Query: Select Field Marketing specific columns
+    // Included COLLATE fix for the JOIN to prevent error 1267
+    const query = `
+      SELECT 
+        l.lead_id,
+        l.company_name, 
+        l.lead_name, 
+        l.field_visit_date, 
+        l.field_visit_time, 
+        l.field_visit_priority, 
+        l.assigned_employee,
+        e.first_name,
+        e.last_name,
+        e.username
+      FROM leads l
+      LEFT JOIN employees e 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Field-Marketing'
+      ORDER BY l.field_visit_date DESC, l.field_visit_time ASC
+    `;
+
+    const [rows] = await pool.query(query);
+
+    // ✅ Data Segmentation: Split into Head's data and Team's data
+    const headVisits = [];
+    const teamVisits = [];
+
+    for (const row of rows) {
+      // Create a full name string, or fall back to username/Unassigned
+      let assignedPersonName = "Unassigned";
+      
+      if (row.first_name && row.last_name) {
+        assignedPersonName = `${row.first_name} ${row.last_name}`;
+      } else if (row.username) {
+        assignedPersonName = row.username;
+      }
+
+      // Map database columns to clean JSON keys
+      const visitData = {
+        lead_id: row.lead_id,
+        company_name: row.company_name,
+        lead_name: row.lead_name,
+        visit_date: row.field_visit_date,
+        visit_time: row.field_visit_time,
+        visit_priority: row.field_visit_priority,
+        assigned_person: assignedPersonName,
+        assigned_person_username: row.username || null,
+        assigned_employee_id: row.assigned_employee // Helpful for frontend logic
+      };
+
+      // Check if the assigned employee ID matches the Head's ID
+      if (row.assigned_employee === headId) {
+        headVisits.push(visitData);
+      } else {
+        teamVisits.push(visitData);
+      }
+    }
+
+    // ✅ Return response
+    return res.status(200).json({
+      message: "Field Marketing visit details fetched successfully",
+      total_records: rows.length,
+      head_data: {
+        count: headVisits.length,
+        visits: headVisits,
+      },
+      team_data: {
+        count: teamVisits.length,
+        visits: teamVisits,
+      },
+    });
+
+  } catch (error) {
+    console.error("Error fetching field visit details:", error);
+    res.status(500).json({ error: "Server error" });
   }
 };
 
@@ -544,3 +786,5 @@ export const revertLeadToNew = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+
