@@ -655,6 +655,97 @@ export const assignLeadToAssociateEmployee = async (req, res) => {
   }
 };
 
+/* ------------------ Get Associate Marketing Visit Details (Head & Team) ------------------ */
+export const getAssociateMarketingVisitDetails = async (req, res) => {
+  try {
+    const headId = req.user.employee_id;
+    const roleId = req.user.role_id;
+
+    // ✅ Strict check: Only Associate-Marketing-Head allowed
+    if (roleId !== "Associate-Marketing-Head") {
+      return res.status(403).json({
+        error: "Forbidden: Only Associate-Marketing Head can access visit details.",
+      });
+    }
+
+    // ✅ Query: Select Field Marketing specific columns
+    // Included COLLATE fix for the JOIN to prevent error 1267
+    const query = `
+      SELECT 
+        l.lead_id,
+        l.company_name, 
+        l.lead_name, 
+        l.associate_visit_date, 
+        l.associate_visit_time, 
+        l.associate_visit_priority, 
+        l.assigned_employee,
+        e.first_name,
+        e.last_name,
+        e.username
+      FROM leads l
+      LEFT JOIN employees e 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Associate-Marketing'
+      ORDER BY l.associate_visit_date DESC, l.associate_visit_time ASC
+    `;
+
+    const [rows] = await pool.query(query);
+
+    // ✅ Data Segmentation: Split into Head's data and Team's data
+    const headVisits = [];
+    const teamVisits = [];
+
+    for (const row of rows) {
+      // Create a full name string, or fall back to username/Unassigned
+      let assignedPersonName = "Unassigned";
+      
+      if (row.first_name && row.last_name) {
+        assignedPersonName = `${row.first_name} ${row.last_name}`;
+      } else if (row.username) {
+        assignedPersonName = row.username;
+      }
+
+      // Map database columns to clean JSON keys
+      const visitData = {
+        lead_id: row.lead_id,
+        company_name: row.company_name,
+        lead_name: row.lead_name,
+        visit_date: row.associate_visit_date,
+        visit_time: row.associate_visit_time,
+        visit_priority: row.associate_visit_priority,
+        assigned_person: assignedPersonName,
+        assigned_person_username: row.username || null,
+        assigned_employee_id: row.assigned_employee // Helpful for frontend logic
+      };
+
+      // Check if the assigned employee ID matches the Head's ID
+      if (row.assigned_employee === headId) {
+        headVisits.push(visitData);
+      } else {
+        teamVisits.push(visitData);
+      }
+    }
+
+    // ✅ Return response
+    return res.status(200).json({
+      message: "Associate Marketing visit details fetched successfully",
+      total_records: rows.length,
+      head_data: {
+        count: headVisits.length,
+        visits: headVisits,
+      },
+      team_data: {
+        count: teamVisits.length,
+        visits: teamVisits,
+      },
+    });
+
+  } catch (error) {
+    console.error("Error fetching field visit details:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
 /* ------------------------ Get all leads (IpqsHead) ----------------------- */
 export const getAllLeadsForIpqsHead = async (req, res) => {
   try {

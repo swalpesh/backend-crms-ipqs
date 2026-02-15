@@ -12,7 +12,8 @@ import {
   CorporateMarketingAllLeads,
   revertLeadToNew, 
   changeLeadStageByIpqsHead,
-  assignLeadToEmployee,
+  assignLeadToCorporateEmployee,
+  getCorporateMarketingVisitDetails,
   getAllLeadsForIpqsHead,
 } from "../controllers/corporateleads.controller.js";
 
@@ -73,8 +74,16 @@ router.patch(
 router.patch(
   "/assign",
   requireAuth,
-  requireRole(["Corporate-Marketing-Head", "IpqsHead"]),
-  assignLeadToEmployee
+  requireRole(["Corporate-Marketing-Head", "Corporate-Marketing-Employee", "IpqsHead"]),
+  assignLeadToCorporateEmployee
+);
+
+//get corporate marketing visit details
+router.get(
+  "/corporatemarketing/visit-details",
+  requireAuth,
+  requireRole(["Corporate-Marketing-Head"]),
+  getCorporateMarketingVisitDetails
 );
 
 // All Leads (IpqsHead)

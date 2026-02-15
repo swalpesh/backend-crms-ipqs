@@ -15,6 +15,11 @@ import {
   assignLeadToFieldEmployee,
   getFieldMarketingVisitDetails,
   getAllLeadsForIpqsHead,
+  getScheduledFieldVisits,
+  updateFieldVisitStatus,
+  rescheduleFieldVisits,
+  getUnscheduledFieldLeads,
+  getCompletedLeadsByEmployee
 } from "../controllers/fieldleads.controller.js";
 
 const router = express.Router();
@@ -85,6 +90,51 @@ router.get(
   requireRole(["Field-Marketing-Head"]),
   getFieldMarketingVisitDetails
 );
+
+
+
+
+
+// myactivity page api to get unscheduled leads assigned to particular employee -myactivity page
+router.get(
+  "/unscheduled-leads",
+  requireAuth,
+  getUnscheduledFieldLeads
+);
+
+// GET: Fetch scheduled field visits (supports ?date=YYYY-MM-DD query) -myactivity page
+router.get(
+  "/scheduled-visits",
+  requireAuth,
+  getScheduledFieldVisits
+);
+
+//start myactivity page api to update field visit status
+router.patch(
+  "/visit-status",
+  requireAuth,
+  updateFieldVisitStatus
+);
+
+router.patch(
+  "/reschedule-visit",
+  requireAuth,
+  rescheduleFieldVisits
+);
+
+router.get(
+  "/completed-visits",
+  requireAuth,
+  getCompletedLeadsByEmployee
+);
+
+
+
+
+
+
+
+
 
 // All Leads (IpqsHead)
 router.get("/all", requireAuth, requireRole(["IpqsHead"]), getAllLeadsForIpqsHead);

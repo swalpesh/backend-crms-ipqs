@@ -552,37 +552,85 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
   }
 };
 
-/* -------------------------- Assign lead (Head) -------------------------- */
-export const assignLeadToEmployee = async (req, res) => {
+/* -------------------------- Assign lead to Lead (Head & Employee both) -------------------------- */
+export const assignLeadToCorporateEmployee = async (req, res) => {
   try {
-    const { lead_id, assigned_employee, reason } = req.body;
+    const {
+      lead_id,
+      assigned_employee,
+      corporate_visit_date,
+      corporate_visit_time,
+      corporate_visit_priority,
+      corporate_visit_type,
+      reason,
+    } = req.body;
+
     const headId = req.user.employee_id;
     const department = "Corporate-Marketing";
 
+    // ✅ Validation
     if (!lead_id || !assigned_employee) {
-      return res
-        .status(400)
-        .json({ error: "lead_id and assigned_employee are required." });
+      return res.status(400).json({
+        error: "lead_id and assigned_employee are required.",
+      });
     }
 
-    const [existing] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [
-      lead_id,
-    ]);
-    if (existing.length === 0)
+    // ✅ Check if Lead Exists
+    const [existing] = await pool.query(
+      "SELECT * FROM leads WHERE lead_id = ?",
+      [lead_id]
+    );
+
+    if (existing.length === 0) {
       return res.status(404).json({ error: "Lead not found" });
+    }
 
     const oldLead = existing[0];
 
+    // ✅ Update Lead with Field Marketing Details
     await pool.query(
-      "UPDATE leads SET assigned_employee = ?, lead_stage = ?, updated_at = NOW() WHERE lead_id = ?",
-      [assigned_employee, department, lead_id]
+      `
+      UPDATE leads
+      SET 
+        assigned_employee = ?,
+        lead_stage = ?,
+        corporate_visit_date = ?,
+        corporate_visit_time = ?,
+        corporate_visit_priority = ?,
+        corporate_visit_type = ?,
+        corporate_visit_status = 'Pending',
+        updated_at = NOW()
+      WHERE lead_id = ?
+      `,
+      [
+        assigned_employee,
+        department, // Sets stage to 'Corporate-Marketing'
+        corporate_visit_date || null,
+        corporate_visit_time || null,
+        corporate_visit_priority || "Medium",
+        corporate_visit_type || "Specific",
+        lead_id,
+      ]
     );
 
+    // ✅ Log Activity in Backup Table
     await pool.query(
-      `INSERT INTO lead_activity_backup 
-       (lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
-        changed_by, changed_by_department, changed_by_role, change_type, reason)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      `
+      INSERT INTO lead_activity_backup
+      (
+        lead_id,
+        old_lead_stage,
+        new_lead_stage,
+        old_assigned_employee,
+        new_assigned_employee,
+        changed_by,
+        changed_by_department,
+        changed_by_role,
+        change_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
       [
         lead_id,
         oldLead.lead_stage,
@@ -592,22 +640,116 @@ export const assignLeadToEmployee = async (req, res) => {
         headId,
         req.user.department_id,
         req.user.role_id,
-        "lead_assigned",
-        reason || "Not provided",
+        "corporate_visit_scheduled", // Specific change type
+        reason || "Corporate Marketing visit scheduled",
       ]
     );
 
     res.status(200).json({
-      message: `Lead ${lead_id} assigned successfully`,
+      message: "Corporate Marketing visit scheduled successfully",
       lead_id,
       assigned_employee,
-      lead_stage: department,
-      assigned_by: headId,
-      reason: reason || "Not provided",
+      corporate_visit_date,
+      corporate_visit_time,
+      corporate_visit_priority,
+      corporate_visit_type,
     });
   } catch (error) {
-    console.error("Error assigning lead:", error);
-    res.status(500).json({ error: "Server error while assigning lead" });
+    console.error("Error scheduling corporate visit:", error);
+    res.status(500).json({
+      error: "Server error while scheduling corporate visit",
+    });
+  }
+};
+
+/* ------------------ Get Corporate Marketing Visit Details (Head & Team) ------------------ */
+export const getCorporateMarketingVisitDetails = async (req, res) => {
+  try {
+    const headId = req.user.employee_id;
+    const roleId = req.user.role_id;
+
+    // ✅ Strict check: Only Corporate-Marketing-Head allowed
+    if (roleId !== "Corporate-Marketing-Head") {
+      return res.status(403).json({
+        error: "Forbidden: Only Corporate-Marketing Head can access visit details.",
+      });
+    }
+
+    // ✅ Query: Select Corporate Marketing specific columns
+    // Included COLLATE fix for the JOIN to prevent error 1267
+    const query = `
+      SELECT 
+        l.lead_id,
+        l.company_name, 
+        l.lead_name, 
+        l.corporate_visit_date, 
+        l.corporate_visit_time, 
+        l.corporate_visit_priority, 
+        l.assigned_employee,
+        e.first_name,
+        e.last_name,
+        e.username
+      FROM leads l
+      LEFT JOIN employees e 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Corporate-Marketing'
+      ORDER BY l.corporate_visit_date DESC, l.corporate_visit_time ASC
+    `;
+
+    const [rows] = await pool.query(query);
+
+    // ✅ Data Segmentation: Split into Head's data and Team's data
+    const headVisits = [];
+    const teamVisits = [];
+
+    for (const row of rows) {
+      // Create a full name string, or fall back to username/Unassigned
+      let assignedPersonName = "Unassigned";
+      
+      if (row.first_name && row.last_name) {
+        assignedPersonName = `${row.first_name} ${row.last_name}`;
+      } else if (row.username) {
+        assignedPersonName = row.username;
+      }
+
+      // Map database columns to clean JSON keys
+      const visitData = {
+        lead_id: row.lead_id,
+        company_name: row.company_name,
+        lead_name: row.lead_name,
+        visit_date: row.corporate_visit_date,
+        visit_time: row.corporate_visit_time,
+        visit_priority: row.corporate_visit_priority,
+        assigned_person: assignedPersonName,
+        assigned_person_username: row.username || null,
+        assigned_employee_id: row.assigned_employee // Helpful for frontend logic
+      };
+
+      // Check if the assigned employee ID matches the Head's ID
+      if (row.assigned_employee === headId) {
+        headVisits.push(visitData);
+      } else {
+        teamVisits.push(visitData);
+      }
+    }
+
+    // ✅ Return response
+    return res.status(200).json({
+      message: "Corporate Marketing visit details fetched successfully",
+      total_records: rows.length,
+      head_data: {
+        count: headVisits.length,
+        visits: headVisits,
+      },
+      team_data: {
+        count: teamVisits.length,
+        visits: teamVisits,
+      },
+    });
+
+  } catch (error) {
+    console.error("Error fetching corporate marketing visit details:", error);
+    res.status(500).json({ error: "Server error" });
   }
 };
 

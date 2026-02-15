@@ -728,6 +728,452 @@ export const getFieldMarketingVisitDetails = async (req, res) => {
   }
 };
 
+
+
+
+
+/* ---------------- Get Unscheduled Field Marketing Leads assigned to particular employee (myactivity)---------------- */
+export const getUnscheduledFieldLeads = async (req, res) => {
+  try {
+    const employeeId = req.user.employee_id;
+
+    // ✅ Query: Find leads in Field-Marketing with NULL visit date/time 
+    // AND assigned to (or created by) the logged-in employee
+    const query = `
+      SELECT 
+        l.*,
+        CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
+        assignee.username AS assigned_employee_username,
+        CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
+        creator.username AS created_by_username
+      FROM leads l
+      LEFT JOIN employees assignee 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN employees creator 
+        ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Field-Marketing'
+        AND l.field_visit_date IS NULL
+        AND l.field_visit_time IS NULL
+        AND l.assigned_employee = ?
+      ORDER BY l.created_at DESC
+    `;
+
+    // Execute query
+    const [leads] = await pool.query(query, [employeeId]);
+
+    // ✅ Process Leads (Add Attachments & Clean up names)
+    for (const lead of leads) {
+      // Fetch Attachments
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+
+      // Clean up names (Fallback to username or "Unknown")
+      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
+      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
+      
+      // Remove raw username fields to keep JSON clean
+      delete lead.assigned_employee_username;
+      delete lead.created_by_username;
+    }
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: "Unscheduled Field Marketing leads fetched successfully",
+      employee_id: employeeId,
+      total_unscheduled_leads: leads.length,
+      leads,
+    });
+
+  } catch (error) {
+    console.error("Error fetching unscheduled field leads:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Get Scheduled Field Visits (Filtered by Date) (myactivity)---------------- */
+export const getScheduledFieldVisits = async (req, res) => {
+  try {
+    const employeeId = req.user.employee_id;
+    const { date } = req.query; // Expecting format: YYYY-MM-DD
+
+    // ✅ Base Query: Find assigned leads in Field-Marketing that HAVE a scheduled visit
+    let query = `
+      SELECT 
+        l.*,
+        CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
+        assignee.username AS assigned_employee_username,
+        CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
+        creator.username AS created_by_username
+      FROM leads l
+      LEFT JOIN employees assignee 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN employees creator 
+        ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Field-Marketing'
+        AND l.assigned_employee = ?
+        AND l.field_visit_date IS NOT NULL 
+    `;
+
+    const params = [employeeId];
+
+    // ✅ Dynamic Date Filter
+    if (date) {
+      // Validate date format basic check (YYYY-MM-DD)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(date)) {
+        return res.status(400).json({ error: "Invalid date format. Please use YYYY-MM-DD." });
+      }
+      
+      query += ` AND l.field_visit_date = ?`;
+      params.push(date);
+    }
+
+    // ✅ Order chronologically by the visit date and time
+    query += ` ORDER BY l.field_visit_date ASC, l.field_visit_time ASC`;
+
+    // Execute query
+    const [leads] = await pool.query(query, params);
+
+    // ✅ Process Leads (Add Attachments & Clean up names)
+    for (const lead of leads) {
+      // Fetch Attachments
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+
+      // Clean up names
+      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
+      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
+      
+      delete lead.assigned_employee_username;
+      delete lead.created_by_username;
+    }
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: date 
+        ? `Scheduled visits for ${date} fetched successfully` 
+        : "All scheduled visits fetched successfully",
+      employee_id: employeeId,
+      filter_date: date || "All Dates",
+      total_visits: leads.length,
+      leads,
+    });
+
+  } catch (error) {
+    console.error("Error fetching scheduled field visits:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Update Field Visit Status (Start / Complete) ---------------- */
+export const updateFieldVisitStatus = async (req, res) => {
+  try {
+    const { lead_id, status, location } = req.body;
+    const employeeId = req.user.employee_id;
+
+    // ✅ Basic Validation
+    if (!lead_id || !status) {
+      return res.status(400).json({ error: "lead_id and status are required." });
+    }
+
+    if (!["Pending", "Started", "Completed", "Cancelled"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status. Use Started, Completed, Cancelled, or Pending." });
+    }
+
+    // ✅ Verify Lead & Assignment
+    // Adjusted to also fetch `lead_stage` for the backup logs
+    const [existing] = await pool.query(
+      "SELECT assigned_employee, lead_stage FROM leads WHERE lead_id = ?",
+      [lead_id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    const oldLead = existing[0];
+
+    // Security check: Only the assigned employee can update their own visit status
+    if (oldLead.assigned_employee !== employeeId) {
+      return res.status(403).json({ error: "Forbidden: You are not assigned to this lead's field visit." });
+    }
+
+    // ✅ Dynamic Update Logic for the Leads Table
+    let query = "";
+    let params = [];
+
+    if (status === "Started") {
+      // If they are starting, a location is mandatory
+      if (!location) {
+        return res.status(400).json({ error: "Start location is required when starting a visit." });
+      }
+      query = `
+        UPDATE leads 
+        SET field_lead_visit_status = ?, field_visit_start_location = ?, updated_at = NOW() 
+        WHERE lead_id = ?
+      `;
+      params = [status, location, lead_id];
+
+    } else {
+      // If Completed, Cancelled, or Pending, just update the status
+      query = `
+        UPDATE leads 
+        SET field_lead_visit_status = ?, updated_at = NOW() 
+        WHERE lead_id = ?
+      `;
+      params = [status, lead_id];
+    }
+
+    // Execute the leads table update
+    await pool.query(query, params);
+
+    // ✅ Insert into Lead Activity Backup
+    // Determine the type of change and formulate a reason message based on status
+    const changeType = status === "Started" ? "Field Visit Started" :
+                       status === "Completed" ? "Field Visit Completed" :
+                       `Field Visit ${status}`;
+
+    const reasonText = status === "Started" 
+      ? `Field visit started at location: ${location}` 
+      : `Field visit status updated to ${status}`;
+
+    await pool.query(
+      `
+      INSERT INTO lead_activity_backup
+      (
+        lead_id,
+        old_lead_stage,
+        new_lead_stage,
+        old_assigned_employee,
+        new_assigned_employee,
+        changed_by,
+        changed_by_department,
+        changed_by_role,
+        change_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        lead_id,
+        oldLead.lead_stage,
+        oldLead.lead_stage, // Stage remains the same during a visit update
+        oldLead.assigned_employee,
+        oldLead.assigned_employee, // Assignee remains the same
+        employeeId,
+        req.user.department_id || "Field-Marketing", // Fallback if department_id is missing
+        req.user.role_id,
+        changeType,
+        reasonText
+      ]
+    );
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: `Visit status updated to '${status}' successfully.`,
+      lead_id,
+      status,
+      start_location: status === "Started" ? location : undefined
+    });
+
+  } catch (error) {
+    console.error("Error updating field visit status:", error);
+    res.status(500).json({ error: "Server error while updating status" });
+  }
+};
+
+/* ---------------- Reschedule Field Visit ---------------- */
+export const rescheduleFieldVisits = async (req, res) => {
+  try {
+    const { lead_id, new_visit_date, new_visit_time, reason } = req.body;
+    const employeeId = req.user.employee_id;
+    const departmentId = req.user.department_id || "Field-Marketing";
+
+    // ✅ Basic Validation
+    if (!lead_id || !new_visit_date || !new_visit_time) {
+      return res.status(400).json({ 
+        error: "lead_id, new_visit_date, and new_visit_time are required." 
+      });
+    }
+
+    // ✅ Verify Lead & Assignment
+    const [existing] = await pool.query(
+      "SELECT assigned_employee, lead_stage, field_visit_date, field_visit_time FROM leads WHERE lead_id = ?",
+      [lead_id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    const oldLead = existing[0];
+
+    // Security check: Only the assigned employee can reschedule their own visit
+    if (oldLead.assigned_employee !== employeeId) {
+      return res.status(403).json({ 
+        error: "Forbidden: You are not assigned to this lead's field visit." 
+      });
+    }
+
+    // Format old date/time safely for the log message
+    // Converts Date object to YYYY-MM-DD format
+    const oldDate = oldLead.field_visit_date 
+      ? new Date(oldLead.field_visit_date).toISOString().split('T')[0] 
+      : "Unscheduled";
+    const oldTime = oldLead.field_visit_time || "Unscheduled";
+
+    // ✅ 1. Update Leads Table 
+    // Updates the date/time and resets the visit status to 'Pending'
+    await pool.query(
+      `
+      UPDATE leads 
+      SET 
+        field_visit_date = ?, 
+        field_visit_time = ?, 
+        field_lead_visit_status = 'Pending', 
+        updated_at = NOW() 
+      WHERE lead_id = ?
+      `,
+      [new_visit_date, new_visit_time, lead_id]
+    );
+
+    // ✅ 2. Insert into Lead Activity Backup
+    // Build the dynamic string you requested
+    const reasonText = `Lead rescheduled from ${oldDate} ${oldTime} to ${new_visit_date} ${new_visit_time} by employee ${employeeId}. Department: ${departmentId}. ${reason ? `Reason: ${reason}` : ''}`;
+
+    await pool.query(
+      `
+      INSERT INTO lead_activity_backup
+      (
+        lead_id,
+        old_lead_stage,
+        new_lead_stage,
+        old_assigned_employee,
+        new_assigned_employee,
+        changed_by,
+        changed_by_department,
+        changed_by_role,
+        change_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        lead_id,
+        oldLead.lead_stage,
+        oldLead.lead_stage, // Stage remains unchanged
+        oldLead.assigned_employee,
+        oldLead.assigned_employee, // Assignee remains unchanged
+        employeeId,
+        departmentId,
+        req.user.role_id,
+        "Field Visit Rescheduled",
+        reasonText.trim()
+      ]
+    );
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: "Field visit rescheduled successfully.",
+      lead_id,
+      new_visit_date,
+      new_visit_time,
+      previous_visit_date: oldDate,
+      previous_visit_time: oldTime
+    });
+
+  } catch (error) {
+    console.error("Error rescheduling field visit:", error);
+    res.status(500).json({ error: "Server error while rescheduling visit" });
+  }
+};
+
+/* ---------------- Get Completed Leads Grouped by Employee ---------------- */
+export const getCompletedLeadsByEmployee = async (req, res) => {
+  try {
+    // ✅ Query: Get all leads marked as 'Completed' 
+    // We join with the employees table to get the name of the assigned employee
+    const query = `
+      SELECT 
+        l.*,
+        e.first_name, 
+        e.last_name, 
+        e.username
+      FROM leads l
+      LEFT JOIN employees e 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.field_lead_visit_status = 'Completed'
+      ORDER BY l.updated_at DESC
+    `;
+
+    const [rows] = await pool.query(query);
+
+    // ✅ Grouping Logic
+    const groupedData = {};
+
+    rows.forEach((row) => {
+      const empId = row.assigned_employee;
+      const empName = (row.first_name && row.last_name) 
+          ? `${row.first_name} ${row.last_name}` 
+          : (row.username || "Unknown Employee");
+
+      // Initialize the employee group if it doesn't exist
+      if (!groupedData[empId]) {
+        groupedData[empId] = {
+          employee_id: empId,
+          employee_name: empName,
+          completed_count: 0,
+          completed_leads: []
+        };
+      }
+
+      // Add the lead data to this employee's array
+      groupedData[empId].completed_leads.push({
+        lead_id: row.lead_id,
+        lead_name: row.lead_name,
+        company_name: row.company_name,
+        visit_date: row.field_visit_date,
+        visit_time: row.field_visit_time,
+        completion_timestamp: row.updated_at,
+        start_location: row.field_visit_start_location
+      });
+
+      groupedData[empId].completed_count += 1;
+    });
+
+    // ✅ Convert object to Array for response
+    const finalResult = Object.values(groupedData);
+
+    return res.status(200).json({
+      message: "Completed field visits fetched and grouped successfully",
+      total_employees_with_completions: finalResult.length,
+      data: finalResult
+    });
+
+  } catch (error) {
+    console.error("Error fetching completed leads summary:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+
+
+
 /* ------------------------ Get all leads (IpqsHead) ----------------------- */
 export const getAllLeadsForIpqsHead = async (req, res) => {
   try {

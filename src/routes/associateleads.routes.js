@@ -13,6 +13,7 @@ import {
   revertLeadToNew, 
   changeLeadStageByIpqsHead,
   assignLeadToAssociateEmployee,
+  getAssociateMarketingVisitDetails,
   getAllLeadsForIpqsHead,
 } from "../controllers/associateleads.controller.js";
 
@@ -75,6 +76,14 @@ router.patch(
   requireAuth,
   requireRole(["Associate-Marketing-Head", "Associate-Marketing-Employee", "IpqsHead"]),
   assignLeadToAssociateEmployee
+);
+
+//get associate marketing visit details
+router.get(
+  "/associatemarketing/visit-details",
+  requireAuth,
+  requireRole(["Associate-Marketing-Head"]),
+  getAssociateMarketingVisitDetails
 );
 
 // All Leads (IpqsHead)
