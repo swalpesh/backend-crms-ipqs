@@ -19,7 +19,8 @@ import {
   updateFieldVisitStatus,
   rescheduleFieldVisits,
   getUnscheduledFieldLeads,
-  getCompletedLeadsByEmployee
+  getCompletedFieldVisits,
+  FieldTeamTodaysVisits
 } from "../controllers/fieldleads.controller.js";
 
 const router = express.Router();
@@ -125,9 +126,15 @@ router.patch(
 router.get(
   "/completed-visits",
   requireAuth,
-  getCompletedLeadsByEmployee
+  getCompletedFieldVisits
 );
 
+router.get(
+  "/fieldmarketing/todays-all-visits",
+  requireAuth,
+  requireRole(["Field-Marketing-Head", "IpqsHead"]),
+  FieldTeamTodaysVisits
+);
 
 
 

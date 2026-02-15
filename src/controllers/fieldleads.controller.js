@@ -1094,70 +1094,176 @@ export const rescheduleFieldVisits = async (req, res) => {
   }
 };
 
-/* ---------------- Get Completed Leads Grouped by Employee ---------------- */
-export const getCompletedLeadsByEmployee = async (req, res) => {
+
+/* ---------------- Get Completed Leads (Based on Activity Logs) ---------------- */
+
+export const getCompletedFieldVisits = async (req, res) => {
   try {
-    // ✅ Query: Get all leads marked as 'Completed' 
-    // We join with the employees table to get the name of the assigned employee
-    const query = `
-      SELECT 
-        l.*,
-        e.first_name, 
-        e.last_name, 
-        e.username
+    const roleId = req.user.role_id;
+    const employeeId = req.user.employee_id;
+
+    const allowedRoles = ["Field-Marketing-Head", "Field-Marketing-Employee"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: Only Field Marketing Team members can access this data.",
+      });
+    }
+
+    let query = "";
+    let params = [];
+
+    // ✅ Shared Logic: We need to JOIN leads -> backup -> employees
+    // This finds the user who performed the 'visit_completed' action
+    const baseJoins = `
       FROM leads l
+      LEFT JOIN lead_activity_backup lab 
+        ON l.lead_id = lab.lead_id AND lab.change_type = 'Field Visit Completed'
       LEFT JOIN employees e 
-        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.field_lead_visit_status = 'Completed'
-      ORDER BY l.updated_at DESC
+        ON lab.changed_by COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
     `;
 
-    const [rows] = await pool.query(query);
+    const selectFields = `
+      l.*, 
+      e.employee_id AS completed_by_id, 
+      e.first_name, 
+      e.last_name, 
+      e.username
+    `;
 
-    // ✅ Grouping Logic
-    const groupedData = {};
+    // ✅ CASE 1: HEAD (Sees ALL completed visits)
+    if (roleId === "Field-Marketing-Head") {
+      query = `
+        SELECT ${selectFields}
+        ${baseJoins}
+        WHERE l.field_lead_visit_status = 'Completed'
+        ORDER BY l.updated_at DESC
+      `;
+    } 
+    
+    // ✅ CASE 2: EMPLOYEE (Sees only visits THEY completed or were assigned to)
+    else {
+      query = `
+        SELECT DISTINCT ${selectFields}
+        ${baseJoins}
+        WHERE l.field_lead_visit_status = 'Completed'
+        AND (lab.changed_by = ? OR lab.old_assigned_employee = ?)
+        ORDER BY l.updated_at DESC
+      `;
+      params = [employeeId, employeeId];
+    }
 
-    rows.forEach((row) => {
-      const empId = row.assigned_employee;
-      const empName = (row.first_name && row.last_name) 
-          ? `${row.first_name} ${row.last_name}` 
-          : (row.username || "Unknown Employee");
+    const [leads] = await pool.query(query, params);
 
-      // Initialize the employee group if it doesn't exist
-      if (!groupedData[empId]) {
-        groupedData[empId] = {
-          employee_id: empId,
-          employee_name: empName,
-          completed_count: 0,
-          completed_leads: []
-        };
+    // ✅ Process results to format names and add attachments
+    for (const lead of leads) {
+      // 1. Format the "Completed By" Name
+      if (lead.first_name && lead.last_name) {
+        lead.completed_by_name = `${lead.first_name} ${lead.last_name}`;
+      } else {
+        lead.completed_by_name = lead.username || "Unknown";
       }
 
-      // Add the lead data to this employee's array
-      groupedData[empId].completed_leads.push({
-        lead_id: row.lead_id,
-        lead_name: row.lead_name,
-        company_name: row.company_name,
-        visit_date: row.field_visit_date,
-        visit_time: row.field_visit_time,
-        completion_timestamp: row.updated_at,
-        start_location: row.field_visit_start_location
-      });
+      // Cleanup: Remove raw join fields to keep JSON clean (optional)
+      delete lead.first_name;
+      delete lead.last_name;
+      delete lead.username;
 
-      groupedData[empId].completed_count += 1;
-    });
-
-    // ✅ Convert object to Array for response
-    const finalResult = Object.values(groupedData);
+      // 2. Fetch Attachments
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+    }
 
     return res.status(200).json({
-      message: "Completed field visits fetched and grouped successfully",
-      total_employees_with_completions: finalResult.length,
-      data: finalResult
+      message: "Completed Field-Marketing visits fetched successfully",
+      view_mode: roleId === "Field-Marketing-Head" ? "All Team Data" : "Personal History",
+      total: leads.length,
+      leads,
     });
-
   } catch (error) {
-    console.error("Error fetching completed leads summary:", error);
+    console.error("Error fetching completed Field-Marketing visits:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+
+
+/* ---------------- Today's Field Visits (All Employees) ---------------- */
+export const FieldTeamTodaysVisits = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // ✅ Allow only Field-Marketing-Head or IpqsHead
+    if (!["Field-Marketing-Head", "IpqsHead"].includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: Only Field-Marketing Head or IpqsHead can access this.",
+      });
+    }
+
+    // ✅ Fetch employees in Field-Marketing
+    const [employees] = await pool.query(
+      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Field-Marketing'"
+    );
+
+    const data = { employees: [], unassigned_leads: [] };
+
+    // ✅ 1. Get Today's Visits for each Employee
+    for (const emp of employees) {
+      const [leads] = await pool.query(
+        `SELECT * FROM leads 
+         WHERE assigned_employee = ? 
+         AND lead_stage = 'Field-Marketing' 
+         AND field_visit_date = CURDATE() 
+         ORDER BY field_visit_time ASC`,
+        [emp.employee_id]
+      );
+
+      for (const lead of leads) {
+        const [attachments] = await pool.query(
+          "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+          [lead.lead_id]
+        );
+        lead.attachments = attachments;
+      }
+
+      // Only push employee if they actually have visits today (Optional - typically Heads want to see everyone)
+      // Currently pushing everyone, with 0 leads if they have none.
+      data.employees.push({ ...emp, total_todays_visits: leads.length, leads });
+    }
+
+    // ✅ 2. Get Today's Unassigned Visits (Rare, but possible)
+    const [unassigned] = await pool.query(
+      `SELECT * FROM leads 
+       WHERE assigned_employee = '0' 
+       AND lead_stage = 'Field-Marketing' 
+       AND field_visit_date = CURDATE()
+       ORDER BY field_visit_time ASC`
+    );
+
+    for (const lead of unassigned) {
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+    }
+
+    data.unassigned_leads = unassigned;
+
+    res.status(200).json({
+      message: "Today's Field-Marketing visits fetched successfully",
+      date: new Date().toISOString().split('T')[0], // Shows current date YYYY-MM-DD
+      accessed_by: roleId,
+      department: "Field-Marketing",
+      total_employees: data.employees.length,
+      total_unassigned_todays_visits: data.unassigned_leads.length,
+      ...data,
+    });
+  } catch (error) {
+    console.error("Error fetching Today's Field-Marketing visits:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
