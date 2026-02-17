@@ -20,7 +20,11 @@ import {
   rescheduleFieldVisits,
   getUnscheduledFieldLeads,
   getCompletedFieldVisits,
-  FieldTeamTodaysVisits
+  FieldTeamTodaysVisits,
+  getHotFieldLeads,
+  getFieldMarketingEmployeesRevenue,
+  getNewAssignedLeadsSummary,
+  getSalesFunnel
 } from "../controllers/fieldleads.controller.js";
 
 const router = express.Router();
@@ -139,6 +143,34 @@ router.get(
 
 
 
+
+// Dashboard API 
+
+router.get(
+  "/hot-leads",
+  requireAuth,
+  getHotFieldLeads
+);
+
+router.get(
+  "/employees-revenue",
+  requireAuth,
+  requireRole(["Field-Marketing-Head", "Field-Marketing-Employee", "IpqsHead"]), 
+  getFieldMarketingEmployeesRevenue
+);
+
+router.get(
+  "/new-assigned-summary",
+  requireAuth,
+  requireRole(["Field-Marketing-Head", "Field-Marketing-Employee", "IpqsHead"]), 
+  getNewAssignedLeadsSummary
+);
+
+router.get(
+  "/sales-funnel",
+  requireAuth,
+  getSalesFunnel
+);
 
 
 
