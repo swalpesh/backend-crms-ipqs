@@ -420,7 +420,7 @@ export const AssociateMarketingAllLeads = async (req, res) => {
     // }
 
     const [employees] = await pool.query(
-      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Assoicate-Marketing'"
+      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Associate-Marketing'"
     );
 
     const data = { employees: [], unassigned_leads: [] };
@@ -745,6 +745,947 @@ export const getAssociateMarketingVisitDetails = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+/* ---------------- Get Unscheduled Associate Marketing Leads assigned to particular employee (myactivity)---------------- */
+export const getUnscheduledAssociateLeads = async (req, res) => {
+  try {
+    const employeeId = req.user.employee_id;
+
+    // ✅ Query: Find leads in Field-Marketing with NULL visit date/time 
+    // AND assigned to (or created by) the logged-in employee
+    const query = `
+      SELECT 
+        l.*,
+        CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
+        assignee.username AS assigned_employee_username,
+        CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
+        creator.username AS created_by_username
+      FROM leads l
+      LEFT JOIN employees assignee 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN employees creator 
+        ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Associate-Marketing'
+        AND l.associate_visit_date IS NULL
+        AND l.associate_visit_time IS NULL
+        AND l.assigned_employee = ?
+      ORDER BY l.created_at DESC
+    `;
+
+    // Execute query
+    const [leads] = await pool.query(query, [employeeId]);
+
+    // ✅ Process Leads (Add Attachments & Clean up names)
+    for (const lead of leads) {
+      // Fetch Attachments
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+
+      // Clean up names (Fallback to username or "Unknown")
+      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
+      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
+      
+      // Remove raw username associate to keep JSON clean
+      delete lead.assigned_employee_username;
+      delete lead.created_by_username;
+    }
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: "Unscheduled Associate Marketing leads fetched successfully",
+      employee_id: employeeId,
+      total_unscheduled_leads: leads.length,
+      leads,
+    });
+
+  } catch (error) {
+    console.error("Error fetching unscheduled associate marketing leads:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Get Scheduled Associate Visits (Filtered by Date) (myactivity)---------------- */
+export const getScheduledAssociateVisits = async (req, res) => {
+  try {
+    const employeeId = req.user.employee_id;
+    const { date } = req.query; // Expecting format: YYYY-MM-DD
+
+    // ✅ Base Query: Find assigned leads in Field-Marketing that HAVE a scheduled visit
+    let query = `
+      SELECT 
+        l.*,
+        CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
+        assignee.username AS assigned_employee_username,
+        CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
+        creator.username AS created_by_username
+      FROM leads l
+      LEFT JOIN employees assignee 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN employees creator 
+        ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Associate-Marketing'
+        AND l.assigned_employee = ?
+        AND l.associate_visit_date IS NOT NULL 
+    `;
+
+    const params = [employeeId];
+
+    // ✅ Dynamic Date Filter
+    if (date) {
+      // Validate date format basic check (YYYY-MM-DD)
+      const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+      if (!dateRegex.test(date)) {
+        return res.status(400).json({ error: "Invalid date format. Please use YYYY-MM-DD." });
+      }
+      
+      query += ` AND l.associate_visit_date = ?`;
+      params.push(date);
+    }
+
+    // ✅ Order chronologically by the visit date and time
+    query += ` ORDER BY l.associate_visit_date ASC, l.associate_visit_time ASC`;
+
+    // Execute query
+    const [leads] = await pool.query(query, params);
+
+    // ✅ Process Leads (Add Attachments & Clean up names)
+    for (const lead of leads) {
+      // Fetch Attachments
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+
+      // Clean up names
+      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
+      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
+      
+      delete lead.assigned_employee_username;
+      delete lead.created_by_username;
+    }
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: date 
+        ? `Scheduled visits for ${date} fetched successfully` 
+        : "All scheduled visits fetched successfully",
+      employee_id: employeeId,
+      filter_date: date || "All Dates",
+      total_visits: leads.length,
+      leads,
+    });
+
+  } catch (error) {
+    console.error("Error fetching scheduled field visits:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Update Associate Marketing Visit Status (Start / Complete) ---------------- */
+export const updateAssociateMarketingVisitStatus = async (req, res) => {
+  try {
+    const { lead_id, status, location } = req.body;
+    const employeeId = req.user.employee_id;
+
+    // ✅ Basic Validation
+    if (!lead_id || !status) {
+      return res.status(400).json({ error: "lead_id and status are required." });
+    }
+
+    if (!["Pending", "Started", "Completed", "Cancelled"].includes(status)) {
+      return res.status(400).json({ error: "Invalid status. Use Started, Completed, Cancelled, or Pending." });
+    }
+
+    // ✅ Verify Lead & Assignment
+    // Adjusted to also fetch `lead_stage` for the backup logs
+    const [existing] = await pool.query(
+      "SELECT assigned_employee, lead_stage FROM leads WHERE lead_id = ?",
+      [lead_id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    const oldLead = existing[0];
+
+    // Security check: Only the assigned employee can update their own visit status
+    if (oldLead.assigned_employee !== employeeId) {
+      return res.status(403).json({ error: "Forbidden: You are not assigned to this lead's field visit." });
+    }
+
+    // ✅ Dynamic Update Logic for the Leads Table
+    let query = "";
+    let params = [];
+
+    if (status === "Started") {
+      // If they are starting, a location is mandatory
+      if (!location) {
+        return res.status(400).json({ error: "Start location is required when starting a visit." });
+      }
+      query = `
+        UPDATE leads 
+        SET associate_lead_visit_status = ?, associate_visit_start_location = ?, updated_at = NOW() 
+        WHERE lead_id = ?
+      `;
+      params = [status, location, lead_id];
+
+    } else {
+      // If Completed, Cancelled, or Pending, just update the status
+      query = `
+        UPDATE leads 
+        SET associate_lead_visit_status = ?, updated_at = NOW() 
+        WHERE lead_id = ?
+      `;
+      params = [status, lead_id];
+    }
+
+    // Execute the leads table update
+    await pool.query(query, params);
+
+    // ✅ Insert into Lead Activity Backup
+    // Determine the type of change and formulate a reason message based on status
+    const changeType = status === "Started" ? "Associate Visit Started" :
+                       status === "Completed" ? "Associate Visit Completed" :
+                       `Associate Visit ${status}`;
+
+    const reasonText = status === "Started" 
+      ? `Associate visit started at location: ${location}` 
+      : `Associate visit status updated to ${status}`;
+
+    await pool.query(
+      `
+      INSERT INTO lead_activity_backup
+      (
+        lead_id,
+        old_lead_stage,
+        new_lead_stage,
+        old_assigned_employee,
+        new_assigned_employee,
+        changed_by,
+        changed_by_department,
+        changed_by_role,
+        change_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        lead_id,
+        oldLead.lead_stage,
+        oldLead.lead_stage, // Stage remains the same during a visit update
+        oldLead.assigned_employee,
+        oldLead.assigned_employee, // Assignee remains the same
+        employeeId,
+        req.user.department_id || "Associate-Marketing", // Fallback if department_id is missing
+        req.user.role_id,
+        changeType,
+        reasonText
+      ]
+    );
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: `Visit status updated to '${status}' successfully.`,
+      lead_id,
+      status,
+      start_location: status === "Started" ? location : undefined
+    });
+
+  } catch (error) {
+    console.error("Error updating field visit status:", error);
+    res.status(500).json({ error: "Server error while updating status" });
+  }
+};
+
+/* ---------------- Reschedule Associate Marketing Visit ---------------- */
+export const rescheduleAssociateMarketingVisits = async (req, res) => {
+  try {
+    const { lead_id, new_visit_date, new_visit_time, reason } = req.body;
+    const employeeId = req.user.employee_id;
+    const departmentId = req.user.department_id || "Associate-Marketing";
+
+    // ✅ Basic Validation
+    if (!lead_id || !new_visit_date || !new_visit_time) {
+      return res.status(400).json({ 
+        error: "lead_id, new_visit_date, and new_visit_time are required." 
+      });
+    }
+
+    // ✅ Verify Lead & Assignment
+    const [existing] = await pool.query(
+      "SELECT assigned_employee, lead_stage, associate_visit_date, associate_visit_time FROM leads WHERE lead_id = ?",
+      [lead_id]
+    );
+
+    if (existing.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    const oldLead = existing[0];
+
+    // Security check: Only the assigned employee can reschedule their own visit
+    if (oldLead.assigned_employee !== employeeId) {
+      return res.status(403).json({ 
+        error: "Forbidden: You are not assigned to this lead's field visit." 
+      });
+    }
+
+    // Format old date/time safely for the log message
+    // Converts Date object to YYYY-MM-DD format
+    const oldDate = oldLead.associate_visit_date 
+      ? new Date(oldLead.associate_visit_date).toISOString().split('T')[0] 
+      : "Unscheduled";
+    const oldTime = oldLead.associate_visit_time || "Unscheduled";
+
+    // ✅ 1. Update Leads Table 
+    // Updates the date/time and resets the visit status to 'Pending'
+    await pool.query(
+      `
+      UPDATE leads 
+      SET 
+        associate_visit_date = ?, 
+        associate_visit_time = ?, 
+        associate_lead_visit_status = 'Pending', 
+        updated_at = NOW() 
+      WHERE lead_id = ?
+      `,
+      [new_visit_date, new_visit_time, lead_id]
+    );
+
+    // ✅ 2. Insert into Lead Activity Backup
+    // Build the dynamic string you requested
+    const reasonText = `Lead rescheduled from ${oldDate} ${oldTime} to ${new_visit_date} ${new_visit_time} by employee ${employeeId}. Department: ${departmentId}. ${reason ? `Reason: ${reason}` : ''}`;
+
+    await pool.query(
+      `
+      INSERT INTO lead_activity_backup
+      (
+        lead_id,
+        old_lead_stage,
+        new_lead_stage,
+        old_assigned_employee,
+        new_assigned_employee,
+        changed_by,
+        changed_by_department,
+        changed_by_role,
+        change_type,
+        reason
+      )
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `,
+      [
+        lead_id,
+        oldLead.lead_stage,
+        oldLead.lead_stage, // Stage remains unchanged
+        oldLead.assigned_employee,
+        oldLead.assigned_employee, // Assignee remains unchanged
+        employeeId,
+        departmentId,
+        req.user.role_id,
+        "Associate Visit Rescheduled",
+        reasonText.trim()
+      ]
+    );
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: "Associate visit rescheduled successfully.",
+      lead_id,
+      new_visit_date,
+      new_visit_time,
+      previous_visit_date: oldDate,
+      previous_visit_time: oldTime
+    });
+
+  } catch (error) {
+    console.error("Error rescheduling field visit:", error);
+    res.status(500).json({ error: "Server error while rescheduling visit" });
+  }
+};
+
+
+/* ---------------- Get Completed Leads (Based on Activity Logs) ---------------- */
+
+export const getCompletedAssociateVisits = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+    const employeeId = req.user.employee_id;
+
+    const allowedRoles = ["Associate-Marketing-Head", "Associate-Marketing-Employee"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: Only Associate Marketing Team members can access this data.",
+      });
+    }
+
+    let query = "";
+    let params = [];
+
+    // ✅ Shared Logic: We need to JOIN leads -> backup -> employees
+    // This finds the user who performed the 'visit_completed' action
+    const baseJoins = `
+      FROM leads l
+      LEFT JOIN lead_activity_backup lab 
+        ON l.lead_id = lab.lead_id AND lab.change_type = 'Associate Visit Completed'
+      LEFT JOIN employees e 
+        ON lab.changed_by COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+    `;
+
+    const selectFields = `
+      l.*, 
+      e.employee_id AS completed_by_id, 
+      e.first_name, 
+      e.last_name, 
+      e.username
+    `;
+
+    // ✅ CASE 1: HEAD (Sees ALL completed visits)
+    if (roleId === "Associate-Marketing-Head") {
+      query = `
+        SELECT ${selectFields}
+        ${baseJoins}
+        WHERE l.associate_lead_visit_status = 'Completed'
+        ORDER BY l.updated_at DESC
+      `;
+    } 
+    
+    // ✅ CASE 2: EMPLOYEE (Sees only visits THEY completed or were assigned to)
+    else {
+      query = `
+        SELECT DISTINCT ${selectFields}
+        ${baseJoins}
+        WHERE l.associate_lead_visit_status = 'Completed'
+        AND (lab.changed_by = ? OR lab.old_assigned_employee = ?)
+        ORDER BY l.updated_at DESC
+      `;
+      params = [employeeId, employeeId];
+    }
+
+    const [leads] = await pool.query(query, params);
+
+    // ✅ Process results to format names and add attachments
+    for (const lead of leads) {
+      // 1. Format the "Completed By" Name
+      if (lead.first_name && lead.last_name) {
+        lead.completed_by_name = `${lead.first_name} ${lead.last_name}`;
+      } else {
+        lead.completed_by_name = lead.username || "Unknown";
+      }
+
+      // Cleanup: Remove raw join fields to keep JSON clean (optional)
+      delete lead.first_name;
+      delete lead.last_name;
+      delete lead.username;
+
+      // 2. Fetch Attachments
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+    }
+
+    return res.status(200).json({
+      message: "Completed Associate-Marketing visits fetched successfully",
+      view_mode: roleId === "Associate-Marketing-Head" ? "All Team Data" : "Personal History",
+      total: leads.length,
+      leads,
+    });
+  } catch (error) {
+    console.error("Error fetching completed Associate-Marketing visits:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Today's Associate-Marketing Visits (All Employees) ---------------- */
+export const AssociateTeamTodaysVisits = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    if (!["Associate-Marketing-Head", "IpqsHead"].includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: Only Associate-Marketing Head or IpqsHead can access this.",
+      });
+    }
+
+    // ✅ 1. Determine "Today" safely 
+    let targetDate = req.query.date;
+    if (!targetDate) {
+      const localDate = new Date();
+      const tzOffset = localDate.getTimezoneOffset() * 60000;
+      targetDate = new Date(localDate - tzOffset).toISOString().split('T')[0];
+    }
+    
+    console.log("--- DEBUG: Fetching for Date:", targetDate, "---");
+
+    // ✅ 2. Fetch active employees (FIXED: Using LIKE to catch spelling differences)
+    const [employees] = await pool.query(
+      `SELECT employee_id, first_name, last_name, username, email, department_id 
+       FROM employees 
+       WHERE department_id LIKE '%Associate%' AND status = 'active'`
+    );
+    
+    console.log("--- DEBUG: Found Employees:", employees.length, "---");
+
+    // ✅ 3. Fetch ALL of today's leads
+    const [leads] = await pool.query(
+      `SELECT * FROM leads 
+       WHERE lead_stage LIKE '%Associate%' 
+       AND associate_visit_date = ? 
+       ORDER BY associate_visit_time ASC`,
+      [targetDate]
+    );
+    
+    console.log("--- DEBUG: Found Leads for Today:", leads.length, "---");
+
+    // ✅ 4. Initialize Data Maps
+    const employeeMap = {};
+    const unassigned_leads = [];
+
+    // Setup an empty profile for every active employee found
+    employees.forEach((emp) => {
+      employeeMap[emp.employee_id] = {
+        employee_id: emp.employee_id,
+        employee_name: (emp.first_name && emp.last_name) ? `${emp.first_name} ${emp.last_name}` : emp.username,
+        email: emp.email,
+        total_todays_visits: 0,
+        leads: []
+      };
+    });
+
+    // ✅ 5. Distribute Leads
+    for (const lead of leads) {
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+
+      const empId = lead.assigned_employee;
+
+      if (empId === "0" || !empId) {
+        unassigned_leads.push(lead);
+      } else if (employeeMap[empId]) {
+        employeeMap[empId].leads.push(lead);
+        employeeMap[empId].total_todays_visits += 1;
+      } else {
+        // If the lead is assigned to someone NOT in the active employee list
+        unassigned_leads.push(lead); 
+      }
+    }
+
+    const employeeData = Object.values(employeeMap);
+
+    res.status(200).json({
+      message: `Associate-Marketing visits for ${targetDate} fetched successfully`,
+      date: targetDate, 
+      accessed_by: roleId,
+      department: "Associate-Marketing",
+      total_employees: employeeData.length,
+      total_unassigned_todays_visits: unassigned_leads.length,
+      employees: employeeData,
+      unassigned_leads: unassigned_leads
+    });
+
+  } catch (error) {
+    console.error("Error fetching Today's Associate-Marketing visits:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+
+
+
+
+
+
+
+
+// Dashboard Hot Leads API
+
+/* ---------------- Get Hot Leads (Role-Based) ---------------- */
+export const getHotAssociateLeads = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+    const employeeId = req.user.employee_id;
+
+    // ✅ Base Query: Get leads in Field-Marketing that are marked as HOT
+    let query = `
+      SELECT 
+        l.*,
+        CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
+        assignee.username AS assigned_employee_username,
+        CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
+        creator.username AS created_by_username
+      FROM leads l
+      LEFT JOIN employees assignee 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN employees creator 
+        ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.lead_stage = 'Associate-Marketing'
+        AND (l.mark_as_hot_lead = 1 OR l.mark_as_hot_lead = TRUE)
+    `;
+
+    const params = [];
+
+    // ✅ Role-Based Access Control
+    // If the user is NOT a Head, restrict the query to only their assigned leads
+    const headRoles = ["Associate-Marketing-Head", "IpqsHead"];
+    if (!headRoles.includes(roleId)) {
+      query += ` AND l.assigned_employee = ?`;
+      params.push(employeeId);
+    }
+
+    // Order by newest first
+    query += ` ORDER BY l.created_at DESC`;
+
+    const [leads] = await pool.query(query, params);
+
+    // ✅ Process Leads (Fetch Attachments & Clean up names)
+    for (const lead of leads) {
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+
+      // Ensure names fall back to username or "Unknown" safely
+      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
+      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
+      
+      delete lead.assigned_employee_username;
+      delete lead.created_by_username;
+    }
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: "Hot leads fetched successfully",
+      view_mode: headRoles.includes(roleId) ? "All Team Hot Leads" : "My Assigned Hot Leads",
+      total_hot_leads: leads.length,
+      data: leads
+    });
+
+  } catch (error) {
+    console.error("Error fetching hot Associate Marketing leads:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Get Associate Marketing Employees & Detailed Expected Revenue ---------------- */
+export const getAssociateMarketingEmployeesRevenue = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+    
+    // ✅ Security check: Only Associate-Marketing-Head and IpqsHead
+    const allowedRoles = ["Associate-Marketing-Head", "Associate-Marketing-Employee", "IpqsHead"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only authorized Heads can access this data." 
+      });
+    }
+
+    // ✅ 1. Fetch all active Associate Marketing employees
+    const empQuery = `
+      SELECT 
+        employee_id, first_name, last_name, username, email, contact_number
+      FROM employees
+      WHERE department_id = 'Associate-Marketing' AND status = 'active'
+    `;
+    const [employees] = await pool.query(empQuery);
+
+    // ✅ 2. Fetch all completed leads and their revenue details
+    const leadsQuery = `
+      SELECT 
+        lab.old_assigned_employee AS employee_id,
+        l.lead_id,
+        l.lead_name,
+        l.company_name,
+        COALESCE(l.expected_revenue, 0) AS expected_revenue
+      FROM lead_activity_backup lab
+      INNER JOIN leads l ON lab.lead_id = l.lead_id
+      WHERE lab.change_type = 'Associate Visit Completed'
+        AND l.associate_lead_visit_status = 'Completed'
+    `;
+    const [leads] = await pool.query(leadsQuery);
+
+    // ✅ 3. Grouping Logic & Global Total Calculation
+    const employeeMap = {};
+    let totalExpectedRevenueAllEmployees = 0; // NEW: Global counter
+
+    // Initialize the map with all active Associate Marketing employees
+    employees.forEach(emp => {
+      employeeMap[emp.employee_id] = {
+        employee_id: emp.employee_id,
+        employee_name: (emp.first_name && emp.last_name) ? `${emp.first_name} ${emp.last_name}` : emp.username,
+        email: emp.email,
+        contact_number: emp.contact_number,
+        completed_leads_count: 0,
+        total_expected_revenue: 0,
+        completed_leads: [] // This will hold the specific leads
+      };
+    });
+
+    // Populate the map with lead data
+    leads.forEach(lead => {
+      const empId = lead.employee_id;
+      
+      // If the employee exists in our map, add the lead details to their array
+      if (employeeMap[empId]) {
+        const leadRevenue = Number(lead.expected_revenue);
+        
+        employeeMap[empId].completed_leads.push({
+          lead_id: lead.lead_id,
+          lead_name: lead.lead_name,
+          company_name: lead.company_name,
+          expected_revenue: leadRevenue
+        });
+        
+        // Increment the individual employee's totals
+        employeeMap[empId].completed_leads_count += 1;
+        employeeMap[empId].total_expected_revenue += leadRevenue;
+        
+        // Increment the global total for all employees
+        totalExpectedRevenueAllEmployees += leadRevenue; 
+      }
+    });
+
+    // Convert the object map back into an array and sort by highest revenue
+    const results = Object.values(employeeMap).sort((a, b) => b.total_expected_revenue - a.total_expected_revenue);
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: "Associate Marketing employees and detailed revenue fetched successfully",
+      total_employees: results.length,
+      total_expected_revenue_all_employees: totalExpectedRevenueAllEmployees, // NEW: Added to response
+      data: results
+    });
+
+  } catch (error) {
+    console.error("Error fetching detailed employee revenue:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Get New Assigned Leads Summary (Employee Wise) ---------------- */
+export const getNewAssignedLeadsSummary = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+    
+    // ✅ Security check: Only Associate-Marketing-Head and IpqsHead
+    const allowedRoles = ["Associate-Marketing-Head", "Associate-Marketing-Employee", "IpqsHead"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only authorized Heads can access this data." 
+      });
+    }
+
+    // ✅ 1. Fetch all active Associate Marketing employees
+    const empQuery = `
+      SELECT employee_id, first_name, last_name, username 
+      FROM employees 
+      WHERE department_id = 'Associate-Marketing' AND status = 'active'
+    `;
+    const [employees] = await pool.query(empQuery);
+
+    // ✅ 2. Fetch all 'new' leads assigned to the Associate-Marketing stage
+    // Using a subquery to get the exact time it was assigned to this employee
+    const leadsQuery = `
+      SELECT 
+        l.lead_id, 
+        l.lead_name, 
+        l.company_name, 
+        l.assigned_employee, 
+        COALESCE(
+          (SELECT MAX(change_timestamp) 
+           FROM lead_activity_backup 
+           WHERE lead_id = l.lead_id AND new_assigned_employee = l.assigned_employee),
+          l.updated_at,
+          l.created_at
+        ) AS assigned_on
+      FROM leads l
+      WHERE l.lead_stage = 'Associate-Marketing' 
+        AND l.lead_status = 'new'
+    `;
+    const [leads] = await pool.query(leadsQuery);
+
+    // ✅ 3. Grouping Logic & Today's Date Calculation
+    const employeeMap = {};
+    let totalNewLeads = 0;
+    let totalNewLeadsToday = 0;
+
+    // Helper function to check if a date is "today"
+    const today = new Date();
+    const isToday = (dateString) => {
+      if (!dateString) return false;
+      const d = new Date(dateString);
+      return (
+        d.getDate() === today.getDate() &&
+        d.getMonth() === today.getMonth() &&
+        d.getFullYear() === today.getFullYear()
+      );
+    };
+
+    // Initialize the map with all active Field Marketing employees
+    employees.forEach((emp) => {
+      employeeMap[emp.employee_id] = {
+        employee_id: emp.employee_id,
+        employee_name: (emp.first_name && emp.last_name) ? `${emp.first_name} ${emp.last_name}` : emp.username,
+        total_assigned: 0,
+        today_assigned: 0, // NEW: Track today's assignments per employee
+        assigned_leads: [] 
+      };
+    });
+
+    // Populate the map with lead data
+    leads.forEach((lead) => {
+      const empId = lead.assigned_employee;
+      
+      // If the assigned employee exists in our Field Marketing map
+      if (employeeMap[empId]) {
+        employeeMap[empId].assigned_leads.push({
+          lead_id: lead.lead_id,
+          lead_name: lead.lead_name,
+          company_name: lead.company_name,
+          assigned_on: lead.assigned_on 
+        });
+        
+        // Increment the individual employee's total counter
+        employeeMap[empId].total_assigned += 1;
+        
+        // Increment global total
+        totalNewLeads += 1;
+        
+        // Check if created/assigned today
+        if (isToday(lead.assigned_on)) {
+          totalNewLeadsToday += 1; // Increment global today counter
+          employeeMap[empId].today_assigned += 1; // NEW: Increment employee's today counter
+        }
+      }
+    });
+
+    // Convert object to array and sort by those who have the most leads assigned overall
+    const results = Object.values(employeeMap).sort((a, b) => b.total_assigned - a.total_assigned);
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: "New assigned leads summary fetched successfully",
+      total_new_leads_overall: totalNewLeads,
+      total_new_leads_today: totalNewLeadsToday,
+      data: results
+    });
+
+  } catch (error) {
+    console.error("Error fetching new assigned leads summary:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Get Sales Funnel Data (Role-Aware) ---------------- */
+export const getSalesFunnel = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+    const employeeId = req.user.employee_id;
+
+    // ✅ Determine Access Level
+    const isHead = ["Associate-Marketing-Head", "IpqsHead"].includes(roleId);
+
+    // Setup SQL parameters
+    const params = isHead ? [] : [employeeId, employeeId];
+
+    // ✅ 1. Get the TRUE Funnel Pool
+    // This query fetches leads currently in Associate-Marketing AND leads that 
+    // were successfully completed/transferred to another department.
+    const funnelQuery = `
+      SELECT 
+        l.lead_id, 
+        l.associate_visit_date, 
+        l.associate_lead_visit_status, 
+        l.lead_stage
+      FROM leads l
+      WHERE 
+        (l.lead_stage = 'Associate-Marketing' ${isHead ? "" : "AND l.assigned_employee = ?"})
+        OR 
+        l.lead_id IN (
+          SELECT lead_id 
+          FROM lead_activity_backup 
+          WHERE old_lead_stage = 'Associate-Marketing' 
+            AND new_lead_stage != 'Associate-Marketing'
+            ${isHead ? "" : "AND old_assigned_employee = ?"}
+        )
+    `;
+
+    const [funnelLeads] = await pool.query(funnelQuery, params);
+
+    // ✅ 2. Extract & Calculate Math from the Pool
+    let totalFunnelLeads = funnelLeads.length;
+    let scheduledVisits = 0;
+    let completedVisits = 0;
+    let transferredVisits = 0;
+
+    funnelLeads.forEach((lead) => {
+      // If it has a date, it was scheduled
+      if (lead.associate_visit_date) {
+        scheduledVisits++;
+      }
+      
+      // If the Associate status is Completed
+      if (lead.associate_lead_visit_status === 'Completed') {
+        completedVisits++;
+      }
+      
+      // If the stage is no longer Associate-Marketing, it was transferred forward
+      if (lead.lead_stage !== 'Associate-Marketing') {
+        transferredVisits++;
+      }
+    });
+
+    // ✅ 3. Helper to calculate percentage safely
+    const calcPercent = (part, total) => {
+      if (total === 0) return "0%";
+      return Math.round((part / total) * 100) + "%";
+    };
+
+    // Build the final payload formatted exactly for the UI
+    const responseData = {
+      total_leads: {
+        count: totalFunnelLeads,
+        percentage: totalFunnelLeads > 0 ? "100%" : "0%"
+      },
+      scheduled_visits: {
+        count: scheduledVisits,
+        percentage: calcPercent(scheduledVisits, totalFunnelLeads)
+      },
+      completed_visits: {
+        count: completedVisits,
+        percentage: calcPercent(completedVisits, totalFunnelLeads)
+      },
+      transferred_visits: {
+        count: transferredVisits,
+        percentage: calcPercent(transferredVisits, totalFunnelLeads)
+      }
+    };
+
+    // ✅ Return Response
+    return res.status(200).json({
+      message: "Sales funnel data fetched successfully",
+      view_mode: isHead ? "All Team Funnel" : "My Personal Funnel",
+      data: responseData
+    });
+
+  } catch (error) {
+    console.error("Error fetching sales funnel:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+
 
 /* ------------------------ Get all leads (IpqsHead) ----------------------- */
 export const getAllLeadsForIpqsHead = async (req, res) => {

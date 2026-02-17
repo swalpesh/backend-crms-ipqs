@@ -15,6 +15,16 @@ import {
   assignLeadToAssociateEmployee,
   getAssociateMarketingVisitDetails,
   getAllLeadsForIpqsHead,
+  getHotAssociateLeads,
+  getAssociateMarketingEmployeesRevenue,
+  getNewAssignedLeadsSummary,
+  getSalesFunnel,
+  getUnscheduledAssociateLeads,
+  getScheduledAssociateVisits,
+  updateAssociateMarketingVisitStatus,
+  rescheduleAssociateMarketingVisits,
+  getCompletedAssociateVisits,
+  AssociateTeamTodaysVisits
 } from "../controllers/associateleads.controller.js";
 
 const router = express.Router();
@@ -78,6 +88,52 @@ router.patch(
   assignLeadToAssociateEmployee
 );
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// Dashboard API 
+
+router.get(
+  "/hot-leads",
+  requireAuth,
+  getHotAssociateLeads
+);
+
+router.get(
+  "/employees-revenue",
+  requireAuth,
+  requireRole(["Associate-Marketing-Head", "Associate-Marketing-Employee", "IpqsHead"]), 
+  getAssociateMarketingEmployeesRevenue
+);
+
+router.get(
+  "/new-assigned-summary",
+  requireAuth,
+  requireRole(["Associate-Marketing-Head", "Associate-Marketing-Employee", "IpqsHead"]), 
+  getNewAssignedLeadsSummary
+);
+
+router.get(
+  "/sales-funnel",
+  requireAuth,
+  getSalesFunnel
+);
+
+
+
+
 //get associate marketing visit details
 router.get(
   "/associatemarketing/visit-details",
@@ -85,6 +141,54 @@ router.get(
   requireRole(["Associate-Marketing-Head"]),
   getAssociateMarketingVisitDetails
 );
+
+
+// myactivity page api to get unscheduled leads assigned to particular employee -myactivity page
+router.get(
+  "/unscheduled-leads",
+  requireAuth,
+  getUnscheduledAssociateLeads
+);
+
+// GET: Fetch scheduled associate marketing visits (supports ?date=YYYY-MM-DD query) -myactivity page
+router.get(
+  "/scheduled-visits",
+  requireAuth,
+  getScheduledAssociateVisits
+);
+
+//start myactivity page api to update associate marketing visit status
+router.patch(
+  "/visit-status",
+  requireAuth,
+  updateAssociateMarketingVisitStatus
+);
+
+router.patch(
+  "/reschedule-visit",
+  requireAuth,
+  rescheduleAssociateMarketingVisits
+);
+
+router.get(
+  "/completed-visits",
+  requireAuth,
+  getCompletedAssociateVisits
+);
+
+router.get(
+  "/associatemarketing/todays-all-visits",
+  requireAuth,
+  requireRole(["Associate-Marketing-Head", "IpqsHead"]),
+  AssociateTeamTodaysVisits
+);
+
+
+
+
+
+
+
 
 // All Leads (IpqsHead)
 router.get("/all", requireAuth, requireRole(["IpqsHead"]), getAllLeadsForIpqsHead);
