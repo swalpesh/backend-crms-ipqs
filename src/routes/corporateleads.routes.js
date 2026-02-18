@@ -15,6 +15,17 @@ import {
   assignLeadToCorporateEmployee,
   getCorporateMarketingVisitDetails,
   getAllLeadsForIpqsHead,
+  getUnscheduledCorporateLeads,
+  getScheduledCorporateVisits,
+  updateCorporateMarketingVisitStatus,
+  rescheduleCorporateMarketingVisits,
+  getCompletedCorporateVisits,
+  CorporateTeamTodaysVisits,
+  getHotCorporateLeads,
+  getCorporateMarketingEmployeesRevenue,
+  getNewAssignedLeadsSummary,
+  getSalesFunnel
+
 } from "../controllers/corporateleads.controller.js";
 
 const router = express.Router();
@@ -85,6 +96,87 @@ router.get(
   requireRole(["Corporate-Marketing-Head"]),
   getCorporateMarketingVisitDetails
 );
+
+
+
+
+
+// myactivity page api to get unscheduled leads assigned to particular employee -myactivity page
+router.get(
+  "/unscheduled-leads",
+  requireAuth,
+  getUnscheduledCorporateLeads
+);
+
+// GET: Fetch scheduled corporate marketing visits (supports ?date=YYYY-MM-DD query) -myactivity page
+router.get(
+  "/scheduled-visits",
+  requireAuth,
+  getScheduledCorporateVisits
+);
+
+//start myactivity page api to update corporate marketing visit status
+router.patch(
+  "/visit-status",
+  requireAuth,
+  updateCorporateMarketingVisitStatus
+);
+
+router.patch(
+  "/reschedule-visit",
+  requireAuth,
+  rescheduleCorporateMarketingVisits
+);
+
+router.get(
+  "/completed-visits",
+  requireAuth,
+  getCompletedCorporateVisits
+);
+
+router.get(
+  "/corporatemarketing/todays-all-visits",
+  requireAuth,
+  requireRole(["Corporate-Marketing-Head", "IpqsHead"]),
+  CorporateTeamTodaysVisits
+);
+
+
+
+
+
+
+
+
+// Dashboard API 
+
+router.get(
+  "/hot-leads",
+  requireAuth,
+  getHotCorporateLeads
+);
+
+router.get(
+  "/employees-revenue",
+  requireAuth,
+  requireRole(["Corporate-Marketing-Head", "Corporate-Marketing-Employee", "IpqsHead"]), 
+  getCorporateMarketingEmployeesRevenue
+);
+
+router.get(
+  "/new-assigned-summary",
+  requireAuth,
+  requireRole(["Corporate-Marketing-Head", "Corporate-Marketing-Employee", "IpqsHead"]), 
+  getNewAssignedLeadsSummary
+);
+
+router.get(
+  "/sales-funnel",
+  requireAuth,
+  getSalesFunnel
+);
+
+
 
 // All Leads (IpqsHead)
 router.get("/all", requireAuth, requireRole(["IpqsHead"]), getAllLeadsForIpqsHead);
