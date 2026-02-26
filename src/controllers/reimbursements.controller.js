@@ -128,18 +128,17 @@ export const getReimbursements = async (req, res) => {
 export const getReimbursementsByEmployeeId = async (req, res) => {
   try {
     const { employeeId } = req.params;
-    const requesterRoleId = req.user.role_id;
     const requesterId = req.user.employee_id;
 
-    // ✅ Security Check
-    const allowedHeads = ["IpqsHead", "Technical-Team-Head", "Associate-Marketing-Head"];
-    if (!allowedHeads.includes(requesterRoleId) && employeeId !== requesterId) {
+    // ✅ Strict Security Check
+    // Everyone (including Heads) can ONLY view their own reimbursements.
+    if (employeeId !== requesterId) {
       return res.status(403).json({ 
-        error: "Forbidden: You are not authorized to view this employee's expenses." 
+        error: "Forbidden: You are only authorized to view your own reimbursement expenses." 
       });
     }
 
-    // ✅ Query: Fetch flat list first
+    // ✅ Query: Fetch flat list of reimbursements
     const query = `
       SELECT 
         r.*,
@@ -187,7 +186,7 @@ export const getReimbursementsByEmployeeId = async (req, res) => {
           employee_name: employeeName,
           total_claimed_amount: 0,
           total_entries: 0,
-          expenses: [] // The array you requested
+          expenses: [] 
         };
       }
 
