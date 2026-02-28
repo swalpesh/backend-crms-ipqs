@@ -486,13 +486,21 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
 
     const oldLead = leadData[0];
 
+    // ✅ DYNAMIC ASSIGNMENT LOGIC
+    let newAssignedEmployee = '0'; // Default to unassigned for most departments
+    if (new_lead_stage === 'Solutions-Team') {
+        newAssignedEmployee = 'IPQS-H5000'; // Force assign to Solutions Head
+    }
+
+    // ✅ UPDATE QUERY: Removed hardcoded '0', replaced with newAssignedEmployee
     await pool.query(
       `UPDATE leads 
-       SET lead_stage = ?, assigned_employee = '0', lead_status = 'new', updated_at = NOW()
+       SET lead_stage = ?, assigned_employee = ?, lead_status = 'new', updated_at = NOW()
        WHERE lead_id = ?`,
-      [new_lead_stage, lead_id]
+      [new_lead_stage, newAssignedEmployee, lead_id]
     );
 
+    // ✅ BACKUP QUERY: Ensure backup logs the correct new assigned employee
     await pool.query(
       `INSERT INTO lead_activity_backup 
        (lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
@@ -503,7 +511,7 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
         oldLead.lead_stage,
         new_lead_stage,
         oldLead.assigned_employee,
-        "0",
+        newAssignedEmployee, // <-- Replaced hardcoded "0"
         userId,
         departmentId,
         roleId,
@@ -517,7 +525,7 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
       lead_id,
       old_lead_stage: oldLead.lead_stage,
       new_lead_stage,
-      assigned_employee: "0",
+      assigned_employee: newAssignedEmployee, // <-- Updated Response
       lead_status: "new",
       reason: reason || "Not provided",
     });
