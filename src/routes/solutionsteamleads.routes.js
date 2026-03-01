@@ -14,6 +14,11 @@ import {
   changeLeadStageByIpqsHead,
   assignLeadToEmployee,
   getAllLeadsForIpqsHead,
+  createSolution,
+  getAllSolutions,
+  getSolutionStats,
+  getWeeklyIncomingStats,
+  getWeeklySolutionsProvidedStats
 } from "../controllers/solutionsteam.controller.js";
 
 const router = express.Router();
@@ -43,6 +48,10 @@ router.get("/my-leads", requireAuth, listLeadsByEmployee);
 // Today's Follow-ups
 router.get("/my-leads/today-followups", requireAuth, listTodaysFollowUps);
 
+router.get("/solutions/stats/weekly", requireAuth, getWeeklyIncomingStats);
+
+router.get("/solutions/stats/weekly-completed", requireAuth, getWeeklySolutionsProvidedStats);
+
 // Field Marketing All Leads (Head/IpqsHead)
 router.get(
   "/solutionsteam/all-leads",
@@ -58,6 +67,13 @@ router.patch(
   requireRole(["IpqsHead", "Solutions-Team-Head", "Solutions-Team-Employee"]),
   changeLeadStageByIpqsHead
 );
+
+// POST: Add a new solution to a lead
+router.post("/solutions", requireAuth, createSolution);
+
+router.get("/solutions", requireAuth, getAllSolutions);
+
+router.get("/solutions/stats/dashboard", requireAuth, getSolutionStats);
 
 // Assign Lead
 router.patch(
@@ -76,5 +92,7 @@ router.patch(
   requireRole(["Solutions-Team-Head", "Solutions-Team-Employee","IpqsHead"]),
   revertLeadToNew
 );
+
+
 
 export default router;
