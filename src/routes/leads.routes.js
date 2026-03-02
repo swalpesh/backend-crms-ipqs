@@ -22,7 +22,11 @@ import {
   getLeadNotes,
   uploadNotesFiles,
   getAccessibleLeads,
-  getFollowupHistoryByLead
+  getFollowupHistoryByLead,
+  updateQuotationCreatedStatus,
+  getLeadOriginInfo,
+  updatePoConfirmedStatus,
+  getConfirmedRevenueAnalytics
 } from "../controllers/leads.controller.js";
 
 
@@ -49,7 +53,7 @@ router.get(
   listLeads
 );
 
-
+router.get("/analytics/confirmed-revenue", requireAuth, getConfirmedRevenueAnalytics);
 
 
 router.patch(
@@ -101,6 +105,10 @@ router.patch(
   assignLeadToEmployee
 );
 
+router.put("/quotation-created", requireAuth, updateQuotationCreatedStatus);
+router.put("/po-status", requireAuth, updatePoConfirmedStatus);
+
+
 router.get(
   "/all",
   requireAuth,
@@ -116,6 +124,7 @@ router.post("/:lead_id/notes", requireAuth, uploadNotesFiles.array("attachments"
 router.get("/:lead_id/notes", requireAuth, getLeadNotes);
 router.get("/:id/followup-history", getFollowupHistoryByLead);
 
+router.get("/:lead_id/origin", requireAuth, getLeadOriginInfo);
 
 
 

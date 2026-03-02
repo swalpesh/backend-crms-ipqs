@@ -11,7 +11,8 @@ import {
   listMyQuotations,
   getApprovedQuotations,
   getQuotationTeamLeads,
-  getPaymentsTeamLeadsWithQuotations
+  getPaymentsTeamLeadsWithQuotations,
+  transferLeadBackFromQuotation
 } from "../controllers/quotations.controller.js";
 import { requireAuth, requireEmployee } from "../middleware/auth.js";
 
@@ -27,6 +28,7 @@ router.get(
   requireAuth,
   getPaymentsTeamLeadsWithQuotations
 );
+router.patch("/send-back", requireAuth, transferLeadBackFromQuotation);
 router.get("/:id", requireAuth, getQuotation);
 router.put("/:id", requireAuth, uploadCover.single("cover_photo"), updateQuotation);
 router.delete("/:id", requireAuth, deleteQuotation);

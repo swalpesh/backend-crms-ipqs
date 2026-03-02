@@ -347,189 +347,6 @@ function addDaysSafe(dateStr, days = 0) {
   return d.toISOString().slice(0, 10);
 }
 
-/* ---------------------- Update Quotation ---------------------- */
-export const updateQuotation = async (req, res) => {
-  const id = (req.params.id || "").trim();
-  const errors = validationResult(req);
-  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
-
-  const b = req.body;
-  const cover = req.file;
-
-  const conn = await pool.getConnection();
-  try {
-    await conn.beginTransaction();
-
-    // 🔒 Lock current row
-    const [[current]] = await conn.query(
-      `SELECT * FROM quotations WHERE quotation_id = ? FOR UPDATE`,
-      [id]
-    );
-    if (!current) {
-      await conn.query("ROLLBACK");
-      return res.status(404).json({ message: "Quotation not found" });
-    }
-
-    // 🚫 Prevent editing sent quotations
-    if (current.quotation_status !== "saved" && current.quotation_status !== "draft") {
-      await conn.query("ROLLBACK");
-      return res.status(409).json({
-        message: "Quotation cannot be updated once emailed or approved."
-      });
-    }
-
-    // ✅ Optional company change
-    let companyIdToUse = current.company_id;
-    if (b.company_id || b.company_name) {
-      const company = await resolveCompanyId(b.company_id, b.company_name);
-      if (!company) {
-        await conn.query("ROLLBACK");
-        return res.status(400).json({ message: "Invalid company (by id or name)" });
-      }
-      companyIdToUse = company.company_id;
-    }
-
-    // ✅ Handle items if provided
-    let newItems = null;
-    if (typeof b.items === "string") {
-      try {
-        newItems = JSON.parse(b.items);
-      } catch (err) {
-        await conn.query("ROLLBACK");
-        return res.status(400).json({ message: "Invalid items JSON format" });
-      }
-    }
-
-    // ✅ Determine tax rate
-    const taxRateToUse =
-      b.tax_rate !== undefined ? Number(b.tax_rate) : Number(current.tax_rate);
-    if (Number.isNaN(taxRateToUse) || taxRateToUse < 0) {
-      await conn.query("ROLLBACK");
-      return res.status(400).json({ message: "tax_rate must be >= 0" });
-    }
-
-    // ✅ Compute totals
-    let subtotal = 0;
-    if (newItems && newItems.length > 0) {
-      subtotal = newItems.reduce(
-        (sum, i) => sum + (Number(i.qty) * Number(i.rate) || 0),
-        0
-      );
-    } else {
-      const [sumRes] = await conn.query(
-        `SELECT SUM(amount) AS total FROM quotation_items WHERE quotation_id = ?`,
-        [id]
-      );
-      subtotal = Number(sumRes[0].total || 0);
-    }
-    const tax_amount = +(subtotal * (taxRateToUse / 100)).toFixed(2);
-    const total_amount = +(subtotal + tax_amount).toFixed(2);
-
-    // ✅ Handle dates safely
-    const quotation_date = b.quotation_date || current.quotation_date;
-    const validity_days =
-      b.validity_days !== undefined
-        ? Number(b.validity_days)
-        : Number(current.validity_days || 30);
-
-    if (!Number.isFinite(validity_days) || validity_days <= 0) {
-      await conn.query("ROLLBACK");
-      return res.status(400).json({ message: "validity_days must be > 0" });
-    }
-
-    const valid_until = addDaysSafe(quotation_date, validity_days);
-
-    // ✅ Update fields dynamically
-    const sets = [];
-    const args = [];
-    const set = (col, val) => {
-      sets.push(`${col} = ?`);
-      args.push(val);
-    };
-
-    if (b.lead_number) set("lead_number", b.lead_number);
-    if (companyIdToUse !== current.company_id) set("company_id", companyIdToUse);
-    if (b.contact_person_name) set("contact_person_name", b.contact_person_name.trim());
-    if (b.address) set("address", b.address.trim());
-    if (b.reference_no !== undefined) set("reference_no", b.reference_no || null);
-    if (b.currency) set("currency", b.currency.trim());
-    if (b.subject) set("subject", b.subject.trim());
-    if (b.cover_body) set("cover_body", b.cover_body.trim());
-    if (b.discount_amount !== undefined)
-      set("discount_amount", Number(b.discount_amount) || 0);
-
-    set("quotation_date", quotation_date);
-    set("validity_days", validity_days);
-    set("valid_until", valid_until);
-    set("tax_rate", taxRateToUse);
-    set("subtotal", subtotal);
-    set("tax_amount", tax_amount);
-    set("total_amount", total_amount);
-
-    // ✅ Cover Image
-    if (cover) {
-      const uploadDir = path.join(process.cwd(), "uploads/quotations");
-      if (!fs.existsSync(uploadDir)) fs.mkdirSync(uploadDir, { recursive: true });
-
-      const filePath = path.join(
-        uploadDir,
-        `${Date.now()}-${Math.round(Math.random() * 1e9)}${path.extname(
-          cover.originalname
-        )}`
-      );
-      fs.writeFileSync(filePath, cover.buffer);
-      set("cover_image_path", filePath.replace(process.cwd(), "").replace(/\\/g, "/"));
-    }
-
-    if (sets.length) {
-      args.push(id);
-      await conn.query(`UPDATE quotations SET ${sets.join(", ")} WHERE quotation_id = ?`, args);
-    }
-
-    // ✅ Replace items if provided
-    if (newItems && newItems.length > 0) {
-      await conn.query(`DELETE FROM quotation_items WHERE quotation_id = ?`, [id]);
-      for (const [idx, item] of newItems.entries()) {
-        await conn.query(
-          `INSERT INTO quotation_items (quotation_id, position, particulars, qty, rate, amount)
-           VALUES (?, ?, ?, ?, ?, ?)`,
-          [
-            id,
-            idx + 1,
-            item.particulars,
-            item.qty,
-            item.rate,
-            item.qty * item.rate,
-          ]
-        );
-      }
-    }
-
-    await conn.commit();
-
-    // ✅ Return updated record
-    const [[updated]] = await pool.query(
-      `SELECT * FROM quotations WHERE quotation_id = ?`,
-      [id]
-    );
-    const [items] = await pool.query(
-      `SELECT item_id, particulars, qty, rate, amount
-       FROM quotation_items WHERE quotation_id = ? ORDER BY position ASC`,
-      [id]
-    );
-
-    return res.status(200).json({
-      message: "Quotation updated successfully",
-      data: { ...updated, items },
-    });
-  } catch (error) {
-    await conn.query("ROLLBACK");
-    console.error("Update quotation error:", error);
-    return res.status(500).json({ message: "Failed to update quotation" });
-  } finally {
-    conn.release();
-  }
-};
 
 
 /* ───────────────────── DELETE: DELETE /api/quotations/:id ─────────────────── */
@@ -720,22 +537,9 @@ export const getApprovedQuotations = async (req, res) => {
 
 export const getQuotationTeamLeads = async (req, res) => {
   try {
+    // ✅ 1. Fetch ALL columns (*) from the leads table
     const [leads] = await pool.query(
-      `SELECT 
-         lead_id,
-         lead_name,
-         company_name,
-         contact_person_name,
-         contact_person_phone,
-         contact_person_email,
-         company_address,
-         company_country,
-         company_state,
-         company_city,
-         lead_stage,
-         assigned_employee,
-         created_at,
-         updated_at
+      `SELECT *
        FROM leads
        WHERE lead_stage = 'Quotation-Team'
        ORDER BY created_at DESC`
@@ -749,6 +553,27 @@ export const getQuotationTeamLeads = async (req, res) => {
       });
     }
 
+    // ✅ 2. Fetch and append attachments for complete context
+    for (const lead of leads) {
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+      
+      // Optional: If you also want to attach the assigned employee's details
+      if (lead.assigned_employee && lead.assigned_employee !== "0") {
+        const [emp] = await pool.query(
+          "SELECT employee_id, username, email, role_id, department_id FROM employees WHERE employee_id = ?",
+          [lead.assigned_employee]
+        );
+        lead.assigned_employee_details = emp.length ? emp[0] : null;
+      } else {
+        lead.assigned_employee_details = null;
+      }
+    }
+
+    // ✅ 3. Return the fully populated data
     return res.status(200).json({
       message: "Leads in Quotation-Team stage fetched successfully",
       total: leads.length,
@@ -857,3 +682,229 @@ export const getPaymentsTeamLeadsWithQuotations = async (req, res) => {
   }
 };
 
+
+
+
+/* -------------------------------------------------------------------------- */
+/* SEND LEAD BACK TO ORIGIN AFTER QUOTATION                                   */
+/* -------------------------------------------------------------------------- */
+export const transferLeadBackFromQuotation = async (req, res) => {
+  try {
+    // 1. Extract inputs sent from your frontend (based on the origin data)
+    const { lead_id, new_lead_stage, assigned_employee, reason } = req.body;
+    
+    // 2. Extract acting user details from the JWT
+    const userId = req.user.employee_id;
+    const departmentId = req.user.department_id;
+    const roleId = req.user.role_id;
+
+    // ✅ Security: Restrict to Quotation Team & IPQS Head
+    const allowedRoles = [
+      "IpqsHead",
+      "Quotation-Team-Head",
+      "Quotation-Team-Employee",
+    ];
+
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: You are not allowed to transfer leads.",
+      });
+    }
+
+    // ✅ Validation
+    if (!lead_id || !new_lead_stage || !assigned_employee) {
+      return res.status(400).json({ 
+        error: "lead_id, new_lead_stage, and assigned_employee are required." 
+      });
+    }
+
+    // ✅ Fetch Old Data (Required for the backup log)
+    const [leadData] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [lead_id]);
+    
+    if (leadData.length === 0) {
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    const oldLead = leadData[0];
+
+    // ✅ UPDATE QUERY: Changes stage, assigns to original employee, and forces 'follow-up' status
+    await pool.query(
+      `UPDATE leads 
+       SET lead_stage = ?, 
+           assigned_employee = ?, 
+           lead_status = 'follow-up', 
+           updated_at = NOW()
+       WHERE lead_id = ?`,
+      [new_lead_stage, assigned_employee, lead_id]
+    );
+
+    // ✅ BACKUP QUERY: Logs the exact user and reason for the transfer back
+    await pool.query(
+      `INSERT INTO lead_activity_backup 
+       (lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
+        changed_by, changed_by_department, changed_by_role, change_type, reason)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        lead_id,
+        oldLead.lead_stage,
+        new_lead_stage,
+        oldLead.assigned_employee,
+        assigned_employee, 
+        userId,
+        departmentId,
+        roleId,
+        "lead_transferred_back",
+        reason || "Quotation generated. Lead sent back to origin department.",
+      ]
+    );
+
+    // ✅ Success Response
+    res.status(200).json({
+      message: `Lead ${lead_id} successfully sent back to ${new_lead_stage} as a follow-up.`,
+      lead_id,
+      old_lead_stage: oldLead.lead_stage,
+      new_lead_stage,
+      assigned_employee, 
+      lead_status: "follow-up",
+      reason: reason || "Quotation generated. Lead sent back to origin department.",
+    });
+
+  } catch (error) {
+    console.error("Error transferring lead back from quotation:", error);
+    res.status(500).json({ error: "Server error while transferring lead back." });
+  }
+};
+
+
+
+
+/* ─────────────────────── UPDATE: PUT /api/quotations/:id ─────────────────────── */
+export const updateQuotation = async (req, res) => {
+  const errors = validationResult(req);
+  if (!errors.isEmpty()) return res.status(400).json({ errors: errors.array() });
+
+  const id = (req.params.id || "").trim();
+  const b = req.body;
+  const user = req.user;
+
+  // ✅ 1. Check if the quotation exists
+  const [[existingQuote]] = await pool.query(`SELECT * FROM quotations WHERE quotation_id = ?`, [id]);
+  if (!existingQuote) return res.status(404).json({ message: "Quotation not found" });
+
+  // ✅ 2. Parse items safely
+  let items;
+  try {
+    items = parseItems(b.items);
+  } catch (e) {
+    return res.status(400).json({ message: e.message });
+  }
+
+  // ✅ 3. Dates and totals (fallback to existing data if not provided)
+  const quotation_date = b.quotation_date || existingQuote.quotation_date;
+  const validity_days = Number(b.validity_days || existingQuote.validity_days);
+  const valid_until = addDays(quotation_date, validity_days);
+
+  const tax_rate = Number(b.tax_rate || 0);
+  const discount_amount = Number(b.discount_amount || 0);
+  const { subtotal, tax_amount, total_amount } = computeTotals(items, tax_rate, discount_amount);
+
+  // ✅ 4. Cover photo upload logic (keep old image if no new one is uploaded)
+  const cover = req.file; 
+  const cover_image_path = cover ? relUploadPath(cover.path) : existingQuote.cover_image_path;
+
+  const conn = await pool.getConnection();
+  try {
+    await conn.beginTransaction();
+
+    // ✅ 5. Update the quotations table
+    await conn.query(
+      `UPDATE quotations SET
+        lead_number = ?, company_name = ?, contact_person_name = ?, address = ?,
+        cover_image_path = ?, reference_no = ?, quotation_date = ?, validity_days = ?,
+        valid_until = ?, currency = ?, tax_rate = ?, discount_amount = ?,
+        subject = ?, cover_body = ?, customer_type = ?, bill_reference = ?,
+        period = ?, existing_kwh = ?, existing_kvah = ?, effective_pf = ?,
+        per_unit_rate = ?, per_unit_rate_with_taxes = ?, demand_rate = ?,
+        existing_kva_demand = ?, existing_kw_demand = ?, grand_total = ?,
+        subtotal = ?, tax_amount = ?, total_amount = ?,
+        quotation_status = ?
+       WHERE quotation_id = ?`,
+      [
+        b.lead_number !== undefined ? b.lead_number : existingQuote.lead_number,
+        b.company_name !== undefined ? b.company_name : existingQuote.company_name,
+        b.contact_person_name !== undefined ? b.contact_person_name : existingQuote.contact_person_name,
+        b.address !== undefined ? b.address : existingQuote.address,
+        cover_image_path,
+        b.reference_no !== undefined ? b.reference_no : existingQuote.reference_no,
+        quotation_date, validity_days, valid_until,
+        b.currency || existingQuote.currency, tax_rate, discount_amount,
+        b.subject !== undefined ? b.subject : existingQuote.subject,
+        b.cover_body !== undefined ? b.cover_body : existingQuote.cover_body,
+        b.customer_type !== undefined ? b.customer_type : existingQuote.customer_type,
+        b.bill_reference !== undefined ? b.bill_reference : existingQuote.bill_reference,
+        b.period !== undefined ? b.period : existingQuote.period,
+        b.existing_kwh !== undefined ? b.existing_kwh : existingQuote.existing_kwh,
+        b.existing_kvah !== undefined ? b.existing_kvah : existingQuote.existing_kvah,
+        b.effective_pf !== undefined ? b.effective_pf : existingQuote.effective_pf,
+        b.per_unit_rate !== undefined ? b.per_unit_rate : existingQuote.per_unit_rate,
+        b.per_unit_rate_with_taxes !== undefined ? b.per_unit_rate_with_taxes : existingQuote.per_unit_rate_with_taxes,
+        b.demand_rate !== undefined ? b.demand_rate : existingQuote.demand_rate,
+        b.existing_kva_demand !== undefined ? b.existing_kva_demand : existingQuote.existing_kva_demand,
+        b.existing_kw_demand !== undefined ? b.existing_kw_demand : existingQuote.existing_kw_demand,
+        b.grand_total !== undefined ? b.grand_total : existingQuote.grand_total,
+        subtotal, tax_amount, total_amount,
+        b.quotation_status ? b.quotation_status.toLowerCase() : existingQuote.quotation_status,
+        id // The WHERE clause ID
+      ]
+    );
+
+    // ✅ 6. Sync Items: Delete all old items, then insert the new updated list
+    await conn.query(`DELETE FROM quotation_items WHERE quotation_id = ?`, [id]);
+
+    for (const it of items) {
+      await conn.query(
+        `INSERT INTO quotation_items (quotation_id, position, particulars, qty, rate, amount)
+         VALUES (?,?,?,?,?,?)`,
+        [id, it.position, it.particulars, it.qty, it.rate, it.amount]
+      );
+    }
+
+    // ✅ 7. Optional: Log activity if lead_number is attached
+    if (b.lead_number) {
+      await conn.query(
+        `INSERT INTO lead_activity_backup
+         (lead_id, changed_by, changed_by_department, changed_by_role, change_type, reason)
+         VALUES (?, ?, ?, ?, ?, ?)`,
+        [
+          b.lead_number,
+          user.employee_id,
+          user.department_id,
+          user.role_id,
+          "quotation_updated",
+          `Quotation ${id} was updated.`
+        ]
+      );
+    }
+
+    await conn.commit();
+
+    // ✅ 8. Fetch and return the freshly updated quotation
+    const [[updatedQ]] = await pool.query(`SELECT * FROM quotations WHERE quotation_id = ?`, [id]);
+    const [updatedLines] = await pool.query(
+      `SELECT item_id, position, particulars, qty, rate, amount
+       FROM quotation_items WHERE quotation_id = ? ORDER BY position ASC, item_id ASC`,
+      [id]
+    );
+
+    return res.status(200).json({
+      message: "Quotation updated successfully",
+      data: { ...updatedQ, items: updatedLines },
+    });
+  } catch (err) {
+    await conn.query("ROLLBACK");
+    console.error("Update quotation error:", err);
+    return res.status(500).json({ message: "Failed to update quotation" });
+  } finally {
+    conn.release();
+  }
+};
