@@ -598,3 +598,373 @@ export const revertLeadToNew = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
+
+
+
+/* ---------------- POST: Create a New Lead Solution ---------------- */
+export const createSolution = async (req, res) => {
+  try {
+    const { lead_id, solution_provided } = req.body;
+    const employeeId = req.user.employee_id;
+    const roleId = req.user.role_id;
+
+    // ✅ Security Check: Only Solution Team and IpqsHead
+    const allowedRoles = ["Solutions-Team-Head", "Solutions-Team-Employee", "IpqsHead"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Solution Team can add solutions." 
+      });
+    }
+
+    // ✅ Basic Validation
+    if (!lead_id || !solution_provided) {
+      return res.status(400).json({ error: "lead_id and solution_provided are required." });
+    }
+
+    // ✅ Verify Lead Exists & Fetch Name/Company for Response
+    const [leadCheck] = await pool.query(
+      "SELECT lead_name, company_name FROM leads WHERE lead_id = ?", 
+      [lead_id]
+    );
+
+    if (leadCheck.length === 0) {
+      return res.status(404).json({ error: "Lead not found in the system." });
+    }
+
+    const { lead_name, company_name } = leadCheck[0];
+
+    // ✅ Generate Current Date & Time safely
+    const localDate = new Date();
+    const tzOffset = localDate.getTimezoneOffset() * 60000;
+    const localISO = new Date(localDate - tzOffset).toISOString();
+    
+    const currentDate = localISO.split('T')[0]; // YYYY-MM-DD
+    const currentTime = localISO.split('T')[1].split('.')[0]; // HH:MM:SS
+
+    // ✅ Insert into Database
+    const query = `
+      INSERT INTO lead_solutions 
+      (lead_id, solution_provided, solution_date, solution_time, created_by) 
+      VALUES (?, ?, ?, ?, ?)
+    `;
+    
+    const [result] = await pool.query(query, [
+      lead_id, 
+      solution_provided, 
+      currentDate, 
+      currentTime, 
+      employeeId
+    ]);
+
+    return res.status(201).json({
+      message: "Solution logged successfully",
+      data: {
+        solution_id: result.insertId,
+        lead_id,
+        lead_name,
+        company_name,
+        solution_provided,
+        solution_date: currentDate,
+        solution_time: currentTime,
+        created_by: employeeId
+      }
+    });
+
+  } catch (error) {
+    console.error("Error creating solution:", error);
+    res.status(500).json({ error: "Server error while saving the solution." });
+  }
+};
+
+
+/* ---------------- GET: Fetch ALL Solutions ---------------- */
+export const getAllSolutions = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // ✅ Security Check: Only Solutions Team and IpqsHead
+    const allowedRoles = ["Solutions-Team-Head", "Solutions-Team-Employee", "IpqsHead"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Solutions Team can view these solutions." 
+      });
+    }
+
+    // ✅ Fetch ALL Solutions across all leads, including new location/priority fields
+    const query = `
+      SELECT 
+        ls.solution_id,
+        ls.lead_id,
+        ls.solution_provided,
+        ls.solution_date,
+        ls.solution_time,
+        ls.created_at,
+        e.employee_id,
+        e.first_name,
+        e.last_name,
+        e.username,
+        l.lead_name,
+        l.company_name,
+        l.lead_priority,
+        l.company_address,
+        l.company_state,
+        l.company_city,
+        l.company_country
+      FROM lead_solutions ls
+      LEFT JOIN employees e 
+        ON ls.created_by COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN leads l
+        ON ls.lead_id COLLATE utf8mb4_unicode_ci = l.lead_id COLLATE utf8mb4_unicode_ci
+      ORDER BY ls.solution_date DESC, ls.solution_time DESC
+    `;
+
+    const [rows] = await pool.query(query);
+
+    // Format the response securely and include the new fields
+    const formattedData = rows.map(row => ({
+      solution_id: row.solution_id,
+      lead_id: row.lead_id,
+      lead_name: row.lead_name || "Unknown Lead",
+      company_name: row.company_name || "Unknown Company",
+      lead_priority: row.lead_priority || "Unassigned",
+      company_address: row.company_address || "No Address Provided",
+      company_city: row.company_city || "Unknown City",
+      company_state: row.company_state || "Unknown State",
+      company_country: row.company_country || "Unknown Country",
+      solution_provided: row.solution_provided,
+      date: row.solution_date,
+      time: row.solution_time,
+      logged_at: row.created_at,
+      provided_by_id: row.employee_id,
+      provided_by_name: (row.first_name && row.last_name) 
+        ? `${row.first_name} ${row.last_name}` 
+        : (row.username || "Unknown")
+    }));
+
+    return res.status(200).json({
+      message: "All solutions fetched successfully",
+      total_solutions: formattedData.length,
+      data: formattedData
+    });
+
+  } catch (error) {
+    console.error("Error fetching all solutions:", error);
+    res.status(500).json({ error: "Server error while fetching solutions." });
+  }
+};
+
+/* ---------------- GET: Solutions Dashboard Stats & TAT ---------------- */
+export const getSolutionStats = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // ✅ Security Check
+    const allowedRoles = ["Solutions-Team-Head", "Solutions-Team-Employee", "IpqsHead"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Solutions Team can view these statistics." 
+      });
+    }
+
+    // ✅ Determine Current Month & Year safely (avoids MySQL timezone mismatch)
+    const localDate = new Date();
+    const currentMonth = localDate.getMonth() + 1; // getMonth() is 0-indexed
+    const currentYear = localDate.getFullYear();
+
+    // ✅ Fetch Stats in a Single Optimized Query
+    // We use TIMESTAMPDIFF to get the exact hours between lead creation and solution creation.
+    const query = `
+      SELECT 
+        COUNT(ls.solution_id) AS total_solutions,
+        COALESCE(SUM(CASE WHEN MONTH(ls.solution_date) = ? AND YEAR(ls.solution_date) = ? THEN 1 ELSE 0 END), 0) AS current_month_solutions,
+        AVG(TIMESTAMPDIFF(HOUR, l.created_at, ls.created_at)) AS avg_tat_hours
+      FROM lead_solutions ls
+      LEFT JOIN leads l 
+        ON ls.lead_id COLLATE utf8mb4_unicode_ci = l.lead_id COLLATE utf8mb4_unicode_ci
+    `;
+
+    const [results] = await pool.query(query, [currentMonth, currentYear]);
+    const data = results[0];
+
+    // ✅ Format the Math
+    const totalSolutions = Number(data.total_solutions) || 0;
+    const monthlySolutions = Number(data.current_month_solutions) || 0;
+    
+    // Convert average hours to days (rounded to 1 decimal place, e.g., 2.5 days)
+    const avgTatHours = Number(data.avg_tat_hours) || 0;
+    const avgTatDays = parseFloat((avgTatHours / 24).toFixed(1));
+
+    return res.status(200).json({
+      message: "Solution statistics fetched successfully",
+      data: {
+        total_solutions_provided: totalSolutions,
+        solutions_this_month: monthlySolutions,
+        average_turnaround_time_days: avgTatDays,
+        average_turnaround_time_hours: parseFloat(avgTatHours.toFixed(1)) // Providing hours as a helpful fallback
+      }
+    });
+
+  } catch (error) {
+    console.error("Error fetching solution stats:", error);
+    res.status(500).json({ error: "Server error while fetching statistics." });
+  }
+};
+
+
+/* ---------------- GET: Weekly Incoming Leads (Mon-Sun) ---------------- */
+export const getWeeklyIncomingStats = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // ✅ Security Check
+    const allowedRoles = ["Solutions-Team-Head", "Solutions-Team-Employee", "IpqsHead"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Solutions Team can view these statistics." 
+      });
+    }
+
+    // ✅ 1. Calculate Monday to Sunday dates for the current week
+    const today = new Date();
+    // getDay() returns 0 for Sunday, 1 for Monday, etc.
+    const dayOfWeek = today.getDay(); 
+    // Find how many days to subtract to get to Monday
+    const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - distanceToMonday);
+
+    const weekData = [];
+    const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+    // Build our baseline 7-day array
+    for (let i = 0; i < 7; i++) {
+      const currentDate = new Date(startOfWeek);
+      currentDate.setDate(startOfWeek.getDate() + i);
+      
+      // Handle timezone offset to get perfect YYYY-MM-DD strings
+      const tzOffset = currentDate.getTimezoneOffset() * 60000;
+      const localISODate = new Date(currentDate - tzOffset).toISOString().split('T')[0];
+      
+      weekData.push({
+        day: dayNames[i],
+        date: localISODate,
+        incoming_leads_count: 0
+      });
+    }
+
+    const startDateStr = weekData[0].date;
+    const endDateStr = weekData[6].date;
+
+    // ✅ 2. Query the Backup Table 
+    // FIX: Using the exact alias 'activity_date' in the GROUP BY clause
+    const query = `
+      SELECT 
+        DATE_FORMAT(change_timestamp, '%Y-%m-%d') as activity_date, 
+        COUNT(DISTINCT lead_id) as lead_count
+      FROM lead_activity_backup
+      WHERE new_lead_stage LIKE '%Solution%'
+        AND DATE(change_timestamp) BETWEEN ? AND ?
+      GROUP BY activity_date
+    `;
+
+    const [rows] = await pool.query(query, [startDateStr, endDateStr]);
+
+    // ✅ 3. Merge DB Data with our Baseline Array
+    rows.forEach(row => {
+      const matchIndex = weekData.findIndex(day => day.date === row.activity_date);
+      if (matchIndex !== -1) {
+        weekData[matchIndex].incoming_leads_count = Number(row.lead_count);
+      }
+    });
+
+    // ✅ 4. Send Response
+    return res.status(200).json({
+      message: "Weekly incoming solutions leads fetched successfully",
+      week_range: `${startDateStr} to ${endDateStr}`,
+      data: weekData
+    });
+
+  } catch (error) {
+    console.error("Error fetching weekly incoming stats:", error);
+    res.status(500).json({ error: "Server error while fetching weekly statistics." });
+  }
+};
+
+
+
+/* ---------------- GET: Weekly Solutions Provided (Mon-Sun) ---------------- */
+export const getWeeklySolutionsProvidedStats = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // ✅ Security Check
+    const allowedRoles = ["Solutions-Team-Head", "Solutions-Team-Employee", "IpqsHead"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Solutions Team can view these statistics." 
+      });
+    }
+
+    // ✅ 1. Calculate Monday to Sunday dates for the current week
+    const today = new Date();
+    const dayOfWeek = today.getDay(); 
+    const distanceToMonday = dayOfWeek === 0 ? 6 : dayOfWeek - 1;
+    
+    const startOfWeek = new Date(today);
+    startOfWeek.setDate(today.getDate() - distanceToMonday);
+
+    const weekData = [];
+    const dayNames = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+
+    // Build the baseline 7-day array
+    for (let i = 0; i < 7; i++) {
+      const currentDate = new Date(startOfWeek);
+      currentDate.setDate(startOfWeek.getDate() + i);
+      
+      const tzOffset = currentDate.getTimezoneOffset() * 60000;
+      const localISODate = new Date(currentDate - tzOffset).toISOString().split('T')[0];
+      
+      weekData.push({
+        day: dayNames[i],
+        date: localISODate,
+        solutions_provided_count: 0 // Default to 0
+      });
+    }
+
+    const startDateStr = weekData[0].date;
+    const endDateStr = weekData[6].date;
+
+    // ✅ 2. Query the lead_solutions Table 
+    // We group by the formatted date string to avoid ONLY_FULL_GROUP_BY strict mode errors
+    const query = `
+      SELECT 
+        DATE_FORMAT(solution_date, '%Y-%m-%d') as activity_date, 
+        COUNT(solution_id) as solutions_count
+      FROM lead_solutions
+      WHERE solution_date BETWEEN ? AND ?
+      GROUP BY activity_date
+    `;
+
+    const [rows] = await pool.query(query, [startDateStr, endDateStr]);
+
+    // ✅ 3. Merge DB Data with our Baseline Array
+    rows.forEach(row => {
+      const matchIndex = weekData.findIndex(day => day.date === row.activity_date);
+      if (matchIndex !== -1) {
+        weekData[matchIndex].solutions_provided_count = Number(row.solutions_count);
+      }
+    });
+
+    // ✅ 4. Send Response
+    return res.status(200).json({
+      message: "Weekly solutions provided fetched successfully",
+      week_range: `${startDateStr} to ${endDateStr}`,
+      data: weekData
+    });
+
+  } catch (error) {
+    console.error("Error fetching weekly completed stats:", error);
+    res.status(500).json({ error: "Server error while fetching weekly statistics." });
+  }
+};

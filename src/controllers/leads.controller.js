@@ -196,11 +196,11 @@ export const updateLeadStatus = async (req, res) => {
         previousData.follow_up_date || null,
         previousData.follow_up_time || null,
         previousData.follow_up_reason || null,
-        previousData.assigned_employee || null, // ✅ correct column
+        previousData.assigned_employee || null, 
         follow_up_date,
         follow_up_time,
         follow_up_reason,
-        previousData.lead_stage || null, // ✅ correct column
+        previousData.lead_stage || null, 
       ];
 
       console.log("🟢 Inserting followup_history with:", backupData);
@@ -238,8 +238,6 @@ export const updateLeadStatus = async (req, res) => {
     res.status(500).json({ error: "Server error" });
   }
 };
-
-
 
 /* --------------------------- Revert to new ------------------------------ */
 export const revertLeadToNew = async (req, res) => {
@@ -348,11 +346,6 @@ export const listTodaysFollowUps = async (req, res) => {
 /* -------- Tele-Marketing employees & their leads (Head or IpqsHead) ----- */
 export const listTeleMarketingEmployeesAndLeads = async (req, res) => {
   try {
-    // Previously only Tele-Marketing-Head; now allow IpqsHead too.
-    // if (!(isTeleHead(req.user) || isIpqsHead(req.user))) {
-    //   return res.status(403).json({ error: "Forbidden: Only Tele-Marketing Head or IpqsHead can access this." });
-    // }
-
     const departmentId = "Tele-Marketing";
 
     const [employees] = await pool.query(
@@ -479,7 +472,6 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
     return res.status(500).json({ error: "Server error" });
   }
 };
-
 
 /* -------------------------- Assign lead (Head) -------------------------- */
 export const assignLeadToEmployee = async (req, res) => {
@@ -821,7 +813,7 @@ export const getLeadActivityById = async (req, res) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                             MULTER STORAGE SETUP                            */
+/* MULTER STORAGE SETUP                            */
 /* -------------------------------------------------------------------------- */
 const notesStorage = multer.diskStorage({
   destination: (req, file, cb) => {
@@ -845,7 +837,7 @@ export const uploadNotesFiles = multer({
 });
 
 /* -------------------------------------------------------------------------- */
-/*                          FILE COMPRESSION HELPERS                           */
+/* FILE COMPRESSION HELPERS                           */
 /* -------------------------------------------------------------------------- */
 const compressImage = async (filePath) => {
   const ext = path.extname(filePath).toLowerCase();
@@ -875,23 +867,37 @@ const compressOtherFile = async (filePath) => {
   const isImage = [".jpg", ".jpeg", ".png", ".webp"].includes(ext);
   if (isImage) return false;
 
-  try {
+  // ✅ NEW FIX: Skip zipping PDFs entirely to avoid browser display issues
+  if (ext === '.pdf') return false; 
+
+  return new Promise((resolve, reject) => {
     const zipPath = filePath.replace(ext, `.zip`);
     const output = fs.createWriteStream(zipPath);
     const archive = archiver("zip", { zlib: { level: 9 } });
 
+    // Ensure the stream is fully closed and the OS has finished writing the file
+    output.on("close", () => {
+      try {
+        fs.unlinkSync(filePath);
+        fs.renameSync(zipPath, filePath); // rename back to original name
+        console.log(`✅ File zipped (compressed) successfully: ${path.basename(filePath)}`);
+        resolve(true);
+      } catch (err) {
+        console.error("Error renaming zip file:", err);
+        resolve(false);
+      }
+    });
+
+    archive.on("error", (err) => {
+      console.error(`❌ Zip compression failed for ${filePath}:`, err);
+      resolve(false);
+    });
+
+    // Pipe the data and finalize the archive
     archive.pipe(output);
     archive.file(filePath, { name: path.basename(filePath) });
-    await archive.finalize();
-
-    fs.unlinkSync(filePath);
-    fs.renameSync(zipPath, filePath); // rename back to original name
-    console.log(`✅ File zipped (compressed): ${path.basename(filePath)}`);
-    return true;
-  } catch (err) {
-    console.error(`❌ Zip compression failed for ${filePath}:`, err);
-    return false;
-  }
+    archive.finalize();
+  });
 };
 
 const compressFile = async (filePath) => {
@@ -904,10 +910,16 @@ const compressFile = async (filePath) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                        AUTO DECOMPRESSION FOR RETRIEVAL                     */
+/* AUTO DECOMPRESSION FOR RETRIEVAL                     */
 /* -------------------------------------------------------------------------- */
 const decompressIfZipped = (filePath) => {
   try {
+    // ✅ NEW FIX: Prevent API crash if the file is missing from disk
+    if (!fs.existsSync(filePath)) {
+      console.warn(`⚠️ File missing from disk: ${filePath}`);
+      return false;
+    }
+
     // Check if file is ZIP using header bytes
     const fd = fs.openSync(filePath, "r");
     const buffer = Buffer.alloc(4);
@@ -935,7 +947,7 @@ const decompressIfZipped = (filePath) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                            HELPER: SAVE RELATIVE PATH                      */
+/* HELPER: SAVE RELATIVE PATH                      */
 /* -------------------------------------------------------------------------- */
 export const saveNoteAttachments = async (noteId, files) => {
   if (!files || files.length === 0) return;
@@ -955,7 +967,7 @@ export const saveNoteAttachments = async (noteId, files) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                              ADD NOTE TO LEAD                              */
+/* ADD NOTE TO LEAD                              */
 /* -------------------------------------------------------------------------- */
 export const addLeadNote = async (req, res) => {
   try {
@@ -1004,7 +1016,7 @@ export const addLeadNote = async (req, res) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                          GET ALL NOTES FOR A LEAD                          */
+/* GET ALL NOTES FOR A LEAD                          */
 /* -------------------------------------------------------------------------- */
 export const getLeadNotes = async (req, res) => {
   try {
@@ -1059,19 +1071,19 @@ export const getLeadNotes = async (req, res) => {
       );
 
       for (const a of attachments) {
-  const absolutePath = path.join(process.cwd(), a.file_path);
-  const decompressedPath = decompressIfZipped(absolutePath);
+        const absolutePath = path.join(process.cwd(), a.file_path);
+        const decompressedPath = decompressIfZipped(absolutePath);
 
-  // ✅ If decompressed, use that path instead
-  const finalPath = decompressedPath || absolutePath;
+        // ✅ If decompressed, use that path instead
+        const finalPath = decompressedPath || absolutePath;
 
-  // ✅ Generate proper URL (includes 'unzipped/' automatically)
-  a.file_url = `${BASE_URL}/${path
-    .relative(process.cwd(), finalPath)
-    .replace(/\\/g, "/")}`;
+        // ✅ Generate proper URL (includes 'unzipped/' automatically)
+        a.file_url = `${BASE_URL}/${path
+          .relative(process.cwd(), finalPath)
+          .replace(/\\/g, "/")}`;
 
-  a.mime_type = mime.lookup(finalPath) || "application/octet-stream";
-}
+        a.mime_type = mime.lookup(finalPath) || "application/octet-stream";
+      }
 
       n.attachments = attachments;
       n.created_by_details = {
@@ -1096,7 +1108,7 @@ export const getLeadNotes = async (req, res) => {
 };
 
 /* -------------------------------------------------------------------------- */
-/*                   GET ALL LEADS ACCESSIBLE TO LOGGED-IN USER               */
+/* GET ALL LEADS ACCESSIBLE TO LOGGED-IN USER               */
 /* -------------------------------------------------------------------------- */
 export const getAccessibleLeads = async (req, res) => {
   try {
@@ -1175,7 +1187,6 @@ export const getAccessibleLeads = async (req, res) => {
   }
 };
 
-
 export const getFollowupHistoryByLead = async (req, res) => {
   try {
     const { id } = req.params; // lead_id
@@ -1209,5 +1220,301 @@ export const getFollowupHistoryByLead = async (req, res) => {
   } catch (error) {
     console.error("Error fetching follow-up history:", error);
     res.status(500).json({ error: "Server error" });
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* UPDATE REVENUE & PROBABILITY (QUOTATION CREATED)                           */
+/* -------------------------------------------------------------------------- */
+export const updateQuotationCreatedStatus = async (req, res) => {
+  try {
+    const { lead_id, expected_revenue } = req.body;
+    const { role_id } = req.user;
+
+    // ✅ Security Check
+    const allowedRoles = ["Quotation-Team-Head", "Quotation-Team-Employee", "IpqsHead"];
+    if (!allowedRoles.includes(role_id)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Quotation Team can perform this action." 
+      });
+    }
+
+    // ✅ Basic Validation
+    if (!lead_id || expected_revenue === undefined) {
+      return res.status(400).json({ 
+        error: "lead_id and expected_revenue are required." 
+      });
+    }
+
+    // ✅ Single, clean UPDATE query
+    const [result] = await pool.query(
+      `UPDATE leads 
+       SET expected_revenue = ?, 
+           probability = 90, 
+           quotation_created = 'Yes', 
+           updated_at = NOW() 
+       WHERE lead_id = ?`,
+      [expected_revenue, lead_id]
+    );
+
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Lead not found in the system." });
+    }
+
+    return res.status(200).json({
+      message: "Lead quotation status updated successfully",
+      data: {
+        lead_id,
+        expected_revenue,
+        probability: 90,
+        quotation_created: 'Yes'
+      }
+    });
+
+  } catch (error) {
+    console.error("Error updating quotation status:", error);
+    res.status(500).json({ error: "Server error while updating quotation status." });
+  }
+};
+
+
+
+/* -------------------------------------------------------------------------- */
+/* GET LEAD ORIGIN & FIRST ASSIGNED PERSON                                    */
+/* -------------------------------------------------------------------------- */
+export const getLeadOriginInfo = async (req, res) => {
+  try {
+    const { lead_id } = req.params;
+
+    // ✅ 1. Fetch the Creator's Department and details from the leads table
+    const [leadRows] = await pool.query(
+      `SELECT 
+         l.lead_id,
+         l.created_by AS creator_employee_id,
+         e.department_id AS creator_department,
+         e.first_name AS creator_first_name,
+         e.last_name AS creator_last_name,
+         e.username AS creator_username
+       FROM leads l
+       LEFT JOIN employees e 
+         ON l.created_by COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
+       WHERE l.lead_id = ?`,
+      [lead_id]
+    );
+
+    if (leadRows.length === 0) {
+      return res.status(404).json({ error: "Lead not found" });
+    }
+
+    const leadInfo = leadRows[0];
+
+    // ✅ 2. Fetch the FIRST assigned person from the activity backup table
+    // We look for the oldest record where the assigned employee is not '0' (unassigned) or NULL
+    const [historyRows] = await pool.query(
+      `SELECT new_assigned_employee AS first_assigned_employee_id
+       FROM lead_activity_backup
+       WHERE lead_id = ? 
+         AND new_assigned_employee IS NOT NULL 
+         AND new_assigned_employee != '0'
+       ORDER BY change_timestamp ASC
+       LIMIT 1`,
+      [lead_id]
+    );
+
+    let firstAssignedDetails = null;
+
+    // ✅ 3. If the lead was ever assigned to someone, get that person's details
+    if (historyRows.length > 0) {
+      const firstAssignedId = historyRows[0].first_assigned_employee_id;
+
+      const [assignedEmpRows] = await pool.query(
+        `SELECT 
+           employee_id, 
+           department_id, 
+           first_name, 
+           last_name, 
+           username 
+         FROM employees 
+         WHERE employee_id = ?`,
+        [firstAssignedId]
+      );
+
+      if (assignedEmpRows.length > 0) {
+        const emp = assignedEmpRows[0];
+        firstAssignedDetails = {
+          employee_id: emp.employee_id,
+          name: (emp.first_name && emp.last_name) ? `${emp.first_name} ${emp.last_name}` : emp.username,
+          department: emp.department_id
+        };
+      }
+    }
+
+    // ✅ 4. Format and send the response
+    return res.status(200).json({
+      message: "Lead origin information fetched successfully",
+      lead_id: leadInfo.lead_id,
+      origin: {
+        created_by_employee_id: leadInfo.creator_employee_id,
+        created_by_name: (leadInfo.creator_first_name && leadInfo.creator_last_name) 
+          ? `${leadInfo.creator_first_name} ${leadInfo.creator_last_name}` 
+          : leadInfo.creator_username,
+        created_by_department: leadInfo.creator_department || "Unknown Department",
+      },
+      first_assignment: firstAssignedDetails || "This lead has never been assigned to an employee."
+    });
+
+  } catch (error) {
+    console.error("Error fetching lead origin info:", error);
+    res.status(500).json({ error: "Server error while fetching lead origin details." });
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* UPDATE PO CONFIRMED STATUS & LOG TO lead_activity_backup                  */
+/* -------------------------------------------------------------------------- */
+export const updatePoConfirmedStatus = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const { lead_id, po_confirmed, current_stage } = req.body; 
+    // current_stage (e.g., 'Negotiation') helps populate the activity log
+    
+    const { 
+      name: user_name, 
+      department: user_dept, 
+      role_id: user_role 
+    } = req.user;
+
+    // 1. Validation
+    if (!lead_id || !po_confirmed) {
+      return res.status(400).json({ error: "lead_id and po_confirmed are required." });
+    }
+
+    await connection.beginTransaction();
+
+    // 2. Fetch current lead data to capture "Old" values for the backup table
+    const [leadRows] = await connection.query(
+      `SELECT lead_stage, assigned_employee FROM leads WHERE lead_id = ?`,
+      [lead_id]
+    );
+
+    if (leadRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    const currentLead = leadRows[0];
+
+    // 3. Update the Leads table
+    await connection.query(
+      `UPDATE leads SET po_confirmed = ?, updated_at = NOW() WHERE lead_id = ?`,
+      [po_confirmed, lead_id]
+    );
+
+    // 4. Insert into lead_activity_backup using your specific schema
+    const activityReason = po_confirmed === 'Yes' 
+      ? "Customer has officially confirmed the Purchase Order (PO)." 
+      : "Purchase Order confirmation has been revoked/marked No.";
+
+    const logSql = `
+      INSERT INTO lead_activity_backup (
+        lead_id, 
+        old_lead_stage, 
+        new_lead_stage, 
+        old_assigned_employee, 
+        new_assigned_employee, 
+        changed_by, 
+        changed_by_department, 
+        changed_by_role, 
+        change_type, 
+        reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`;
+
+    const logValues = [
+      lead_id,
+      currentLead.lead_stage,             // old_lead_stage
+      currentLead.lead_stage,             // new_lead_stage (Stage hasn't changed, just PO status)
+      currentLead.assigned_employee,      // old_assigned_employee
+      currentLead.assigned_employee,      // new_assigned_employee
+      user_name || 'System',              // changed_by
+      user_dept || 'Sales',               // changed_by_department
+      user_role || 'User',                // changed_by_role
+      'PO_STATUS_UPDATE',                 // change_type
+      activityReason                      // reason
+    ];
+
+    await connection.query(logSql, logValues);
+
+    await connection.commit();
+
+    return res.status(200).json({
+      success: true,
+      message: `PO status updated to ${po_confirmed} and logged to activity backup.`,
+    });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error("PO Update Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  } finally {
+    connection.release();
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* GET TOTAL EXPECTED REVENUE (PO Confirmed & Quotation Created)              */
+/* -------------------------------------------------------------------------- */
+export const getConfirmedRevenueAnalytics = async (req, res) => {
+  try {
+    // 1. Fetch the Sum and the List of Leads in one go
+    // We filter by po_confirmed = 'Yes' AND quotation_created = 'Yes'
+    const [stats] = await pool.query(`
+      SELECT 
+        COUNT(lead_id) as total_confirmed_leads,
+        SUM(expected_revenue) as total_expected_revenue
+      FROM leads 
+      WHERE po_confirmed = 'Yes' AND quotation_created = 'Yes'
+    `);
+
+    const [leads] = await pool.query(`
+      SELECT 
+        lead_id, 
+        company_name, 
+        contact_person_name, 
+        expected_revenue, 
+        lead_stage,
+        updated_at as confirmation_date
+      FROM leads 
+      WHERE po_confirmed = 'Yes' AND quotation_created = 'Yes'
+      ORDER BY updated_at DESC
+    `);
+
+    // 2. Handle empty results
+    if (!stats[0].total_confirmed_leads) {
+      return res.status(200).json({
+        message: "No confirmed POs found yet.",
+        summary: {
+            total_leads: 0,
+            total_revenue: 0
+        },
+        leads: []
+      });
+    }
+
+    // 3. Success Response
+    return res.status(200).json({
+      message: "Confirmed revenue data fetched successfully",
+      summary: {
+        total_leads: stats[0].total_confirmed_leads,
+        total_revenue: parseFloat(stats[0].total_expected_revenue || 0)
+      },
+      leads: leads
+    });
+
+  } catch (error) {
+    console.error("Error fetching revenue analytics:", error);
+    res.status(500).json({ error: "Internal Server Error" });
   }
 };
