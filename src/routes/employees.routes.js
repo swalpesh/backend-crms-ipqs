@@ -8,7 +8,15 @@ import {
   getEmployee,
   getEmployeePhoto,
   updateEmployee,
-  deleteEmployee
+  deleteEmployee,
+  updateInTripStatus,
+  getFieldMarketingEmployees,
+  getAssociateMarketingEmployees,
+  getCorporateMarketingEmployees,
+  getSolutionTeamEmployees,
+  getQuotationTeamEmployees,
+  getTechnicalTeamEmployees,
+  getMyTripStatus
 } from "../controllers/employees.controller.js";
 import {
   loginEmployee,
@@ -78,6 +86,17 @@ router.post(
 
 // List (auth)
 router.get("/", requireAuth, listEmployees);
+
+router.put("/trip-status", requireAuth, updateInTripStatus);
+
+router.get("/department/field-marketing", requireAuth, getFieldMarketingEmployees);
+router.get("/department/associate-marketing", requireAuth, getAssociateMarketingEmployees);
+router.get("/department/corporate-marketing", requireAuth, getCorporateMarketingEmployees);
+router.get("/department/technical-team", requireAuth, getTechnicalTeamEmployees);
+router.get("/department/quotation-team", requireAuth, getQuotationTeamEmployees);
+router.get("/department/solution-team", requireAuth, getSolutionTeamEmployees);
+
+router.get("/my-trip-status", requireAuth, getMyTripStatus);
 
 // Get one (auth)
 router.get("/:id", requireAuth, [param("id").trim().notEmpty()], getEmployee);

@@ -830,10 +830,10 @@ export const getScheduledCorporateVisits = async (req, res) => {
     const employeeId = req.user.employee_id;
     const { date } = req.query; // Expecting format: YYYY-MM-DD
 
-    // ✅ Base Query: Find assigned leads in Corporate-Marketing that HAVE a scheduled visit
     let query = `
       SELECT 
         l.*,
+        DATE_FORMAT(l.corporate_visit_date, '%Y-%m-%d') AS corporate_visit_date,
         CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
         assignee.username AS assigned_employee_username,
         CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
@@ -845,59 +845,64 @@ export const getScheduledCorporateVisits = async (req, res) => {
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
       WHERE l.lead_stage = 'Corporate-Marketing'
         AND l.assigned_employee = ?
-        AND l.corporate_visit_date IS NOT NULL 
+        AND l.corporate_visit_date IS NOT NULL
     `;
 
     const params = [employeeId];
 
-    // ✅ Dynamic Date Filter
+    // Validate and apply date filter
     if (date) {
-      // Validate date format basic check (YYYY-MM-DD)
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(date)) {
-        return res.status(400).json({ error: "Invalid date format. Please use YYYY-MM-DD." });
+        return res.status(400).json({
+          error: "Invalid date format. Please use YYYY-MM-DD."
+        });
       }
-      
+
       query += ` AND l.corporate_visit_date = ?`;
       params.push(date);
     }
 
-    // ✅ Order chronologically by the visit date and time
+    // Order visits
     query += ` ORDER BY l.corporate_visit_date ASC, l.corporate_visit_time ASC`;
 
-    // Execute query
     const [leads] = await pool.query(query, params);
 
-    // ✅ Process Leads (Add Attachments & Clean up names)
+    // Process leads
     for (const lead of leads) {
-      // Fetch Attachments
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
       );
+
       lead.attachments = attachments;
 
-      // Clean up names
-      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
-      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
-      
+      if (!lead.assigned_employee_name?.trim()) {
+        lead.assigned_employee_name =
+          lead.assigned_employee_username || "Unknown";
+      }
+
+      if (!lead.created_by_name?.trim()) {
+        lead.created_by_name =
+          lead.created_by_username || "Unknown";
+      }
+
       delete lead.assigned_employee_username;
       delete lead.created_by_username;
     }
 
-    // ✅ Return Response
     return res.status(200).json({
-      message: date 
-        ? `Scheduled visits for ${date} fetched successfully` 
+      message: date
+        ? `Scheduled visits for ${date} fetched successfully`
         : "All scheduled visits fetched successfully",
       employee_id: employeeId,
       filter_date: date || "All Dates",
       total_visits: leads.length,
-      leads,
+      leads
     });
 
   } catch (error) {
-    console.error("Error fetching scheduled field visits:", error);
+    console.error("Error fetching scheduled corporate visits:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
