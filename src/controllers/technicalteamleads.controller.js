@@ -714,9 +714,9 @@ export const getTechnicalTeamVisitDetails = async (req, res) => {
     const roleId = req.user.role_id;
 
     // ✅ Strict check: Only Technical-Team-Head allowed
-    if (roleId !== "Technical-Team-Head") {
+    if (roleId !== "Technical-Team-Head" && roleId !== "IpqsHead") {
       return res.status(403).json({
-        error: "Forbidden: Only Technical-Team Head can access visit details.",
+        error: "Forbidden: Only Technical-Team Head or IpqsHead can access visit details.",
       });
     }
 
@@ -802,7 +802,7 @@ export const getCompletedTechnicalVisits = async (req, res) => {
     const roleId = req.user.role_id;
     const employeeId = req.user.employee_id;
 
-    const allowedRoles = ["Technical-Team-Head", "Technical-Team-Employee"];
+    const allowedRoles = ["Technical-Team-Head", "Technical-Team-Employee", "IpqsHead"];
     if (!allowedRoles.includes(roleId)) {
       return res.status(403).json({
         error: "Forbidden: Only Technical Team members can access this data.",

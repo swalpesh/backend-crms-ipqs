@@ -70,7 +70,7 @@ router.get(
 router.get(
   "/technicalteam/visit-details",
   requireAuth,
-  requireRole(["Technical-Team-Head"]),
+  requireRole(["Technical-Team-Head", "IpqsHead"]),
   getTechnicalTeamVisitDetails
 );
 
