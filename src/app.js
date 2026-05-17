@@ -26,6 +26,14 @@ import contactRoutes from "./routes/omscontact.routes.js";
 import omsCallbackRoutes from "./routes/omsCallback.routes.js";
 import reimbursementRoutes from "./routes/reimbursements.routes.js";
 import notificationRoutes from "./routes/notifications.routes.js";
+//CHANGED: Imported new Nagpur Associates routes
+import nagpurassociateleadRoutes from "./routes/nagpurassociateleads.routes.js";
+//CHANGED: Imported new Silverline Associates routes
+import silverlineassociateleadRoutes from "./routes/silverlineassociateleads.routes.js";
+//CHANGED: Imported new Trafo Associates routes
+import trafoassociateleadRoutes from "./routes/trafoassociateleads.routes.js";
+//CHANGED: Imported new Y K Enterprises Associates routes
+import ykenterprisesassociateleadRoutes from "./routes/ykenterprisesassociateleads.routes.js";
 
 
 /* ------------------------------ Config ------------------------------ */
@@ -110,6 +118,19 @@ app.use("/api/leads", leadRoutes);
 app.use("/api/fleads", fieldleadRoutes);
 app.use("/api/aleads", associateleadRoutes);
 app.use("/api/cleads", corporateleadRoutes);
+
+// 📝 CHANGED: Registered new endpoint for Nagpur Associates 
+app.use("/api/naleads", nagpurassociateleadRoutes);
+
+// 📝 CHANGED: Registered new endpoint for Silverline Associates 
+app.use("/api/saleads", silverlineassociateleadRoutes);
+
+// 📝 CHANGED: Registered new endpoint for Trafo Associates
+app.use("/api/taleads", trafoassociateleadRoutes);
+
+// 📝 CHANGED: Registered new endpoint for Y K Enterprises Associates
+app.use("/api/ykaleads", ykenterprisesassociateleadRoutes);
+
 app.use("/api/tleads", TechnicalleadRoutes);
 app.use("/api/sleads", SolutionsleadRoutes);
 app.use("/api/contact", contactRoutes);
