@@ -25,9 +25,26 @@ function isCorporateEmployee(user) {
 
 /* --------------------- Auto-generate Lead ID (L-001…) ------------------- */
 async function generateLeadId() {
-  const [rows] = await pool.query("SELECT COUNT(*) as count FROM leads");
-  const next = rows[0].count + 1;
-  return `L-${String(next).padStart(3, "0")}`;
+  // Fetch the absolute highest lead_id currently in the database
+  const [lastLeadData] = await pool.query(
+    `SELECT lead_id 
+     FROM leads 
+     WHERE lead_id LIKE 'L-%' 
+     ORDER BY CAST(SUBSTRING(lead_id, 3) AS UNSIGNED) DESC 
+     LIMIT 1`
+  );
+
+  let nextNumber = 1;
+
+  if (lastLeadData.length > 0) {
+    const lastId = lastLeadData[0].lead_id; // e.g., 'L-184'
+    // Extract the number part, parse it to an integer, and add 1
+    const lastNumber = parseInt(lastId.split('-')[1], 10);
+    nextNumber = lastNumber + 1;
+  }
+
+  // Returns L-185 (or pads with zeros for low numbers like L-001)
+  return `L-${String(nextNumber).padStart(3, "0")}`;
 }
 
 /* -------------------------------- Create -------------------------------- */
