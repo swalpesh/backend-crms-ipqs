@@ -9,23 +9,23 @@ function isIpqsHead(user) {
   );
 }
 
-// 📝 CHANGED: Function name updated to isYkEnterprisesAssociateHead
-function isYkEnterprisesAssociateHead(user) {
+// 📝 CHANGED: Function name updated to isKolhapurAssociateHead
+function isKolhapurAssociateHead(user) {
   return (
-    // 📝 CHANGED: department_id check updated to 'Y-K-Enterprises-Associates'
-    user?.department_id === "Y-K-Enterprises-Associates" &&
-    // 📝 CHANGED: role_id check updated to 'Y-K-Enterprises-Associates-Head'
-    user?.role_id === "Y-K-Enterprises-Associates-Head"
+    // 📝 CHANGED: department_id check updated to 'Kolhapur-Associates'
+    user?.department_id === "Kolhapur-Associates" &&
+    // 📝 CHANGED: role_id check updated to 'Kolhapur-Associates-Head'
+    user?.role_id === "Kolhapur-Associates-Head"
   );
 }
 
-// 📝 CHANGED: Function name updated to isYkEnterprisesAssociateEmployee
-function isYkEnterprisesAssociateEmployee(user) {
+// 📝 CHANGED: Function name updated to isKolhapurAssociateEmployee
+function isKolhapurAssociateEmployee(user) {
   return (
-    // 📝 CHANGED: department_id check updated to 'Y-K-Enterprises-Associates'
-    user?.department_id === "Y-K-Enterprises-Associates" &&
-    // 📝 CHANGED: role_id check updated to 'Y-K-Enterprises-Associates-Employee'
-    user?.role_id === "Y-K-Enterprises-Associates-Employee"
+    // 📝 CHANGED: department_id check updated to 'Kolhapur-Associates'
+    user?.department_id === "Kolhapur-Associates" &&
+    // 📝 CHANGED: role_id check updated to 'Kolhapur-Associates-Employee'
+    user?.role_id === "Kolhapur-Associates-Employee"
   );
 }
 
@@ -144,8 +144,8 @@ export const createLead = async (req, res) => {
         lead_status === "follow-up" ? follow_up_date : null,
         lead_status === "follow-up" ? follow_up_time : null,
         
-        // 📝 CHANGED: Default lead_stage mapped to "Y-K-Enterprises-Associates"
-        lead_stage || "Y-K-Enterprises-Associates",
+        // 📝 CHANGED: Default lead_stage mapped to "Kolhapur-Associates"
+        lead_stage || "Kolhapur-Associates",
 
         lead_type || null,
         lead_priority || "Medium", 
@@ -161,8 +161,8 @@ export const createLead = async (req, res) => {
       `INSERT INTO lead_activity_backup 
       (lead_id, new_lead_stage, new_assigned_employee, reason, change_timestamp)
       VALUES (?, ?, ?, 'New Lead Created', CURRENT_TIMESTAMP)`,
-      // 📝 CHANGED: Backup log default mapped to "Y-K-Enterprises-Associates"
-      [lead_id, lead_stage || "Y-K-Enterprises-Associates", assigned_employee || "0"]
+      // 📝 CHANGED: Backup log default mapped to "Kolhapur-Associates"
+      [lead_id, lead_stage || "Kolhapur-Associates", assigned_employee || "0"]
     );
 
     // ✅ 3. Handle attachments (optional)
@@ -320,8 +320,8 @@ export const listLeadsByEmployee = async (req, res) => {
       LEFT JOIN employees creator 
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
       WHERE l.assigned_employee = ? 
-      -- 📝 CHANGED: Filter by 'Y-K-Enterprises-Associates' stage
-      AND l.lead_stage = 'Y-K-Enterprises-Associates'
+      -- 📝 CHANGED: Filter by 'Kolhapur-Associates' stage
+      AND l.lead_stage = 'Kolhapur-Associates'
     `;
 
     const params = [employeeId];
@@ -379,8 +379,8 @@ export const listTodaysFollowUps = async (req, res) => {
       `SELECT * FROM leads 
        WHERE (created_by = ? OR assigned_employee = ?)
        AND lead_status = 'follow-up' 
-       -- 📝 CHANGED: Filter by 'Y-K-Enterprises-Associates' stage
-       AND lead_stage = 'Y-K-Enterprises-Associates'
+       -- 📝 CHANGED: Filter by 'Kolhapur-Associates' stage
+       AND lead_stage = 'Kolhapur-Associates'
        AND follow_up_date = CURDATE()
        ORDER BY follow_up_time ASC`,
       [employeeId, employeeId]
@@ -407,20 +407,20 @@ export const listTodaysFollowUps = async (req, res) => {
   }
 };
 
-// 📝 CHANGED: Function name changed to YkEnterprisesAssociatesAllLeads
-export const YkEnterprisesAssociatesAllLeads = async (req, res) => {
+// 📝 CHANGED: Function name changed to KolhapurAssociatesAllLeads
+export const KolhapurAssociatesAllLeads = async (req, res) => {
   try {
     const [employees] = await pool.query(
-      // 📝 CHANGED: Query updated to fetch 'Y-K-Enterprises-Associates' employees
-      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Y-K-Enterprises-Associates'"
+      // 📝 CHANGED: Query updated to fetch 'Kolhapur-Associates' employees
+      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Kolhapur-Associates'"
     );
 
     const data = { employees: [], unassigned_leads: [] };
 
     for (const emp of employees) {
       const [leads] = await pool.query(
-        // 📝 CHANGED: Query updated to fetch 'Y-K-Enterprises-Associates' leads for employee
-        "SELECT * FROM leads WHERE assigned_employee = ? AND lead_stage = 'Y-K-Enterprises-Associates'",
+        // 📝 CHANGED: Query updated to fetch 'Kolhapur-Associates' leads for employee
+        "SELECT * FROM leads WHERE assigned_employee = ? AND lead_stage = 'Kolhapur-Associates'",
         [emp.employee_id]
       );
 
@@ -436,8 +436,8 @@ export const YkEnterprisesAssociatesAllLeads = async (req, res) => {
     }
 
     const [unassigned] = await pool.query(
-      // 📝 CHANGED: Query updated to fetch unassigned 'Y-K-Enterprises-Associates' leads
-      "SELECT * FROM leads WHERE assigned_employee = '0' AND lead_stage = 'Y-K-Enterprises-Associates'"
+      // 📝 CHANGED: Query updated to fetch unassigned 'Kolhapur-Associates' leads
+      "SELECT * FROM leads WHERE assigned_employee = '0' AND lead_stage = 'Kolhapur-Associates'"
     );
 
     for (const lead of unassigned) {
@@ -451,15 +451,15 @@ export const YkEnterprisesAssociatesAllLeads = async (req, res) => {
     data.unassigned_leads = unassigned;
 
     res.status(200).json({
-      // 📝 CHANGED: Response message and department tag updated to 'Y-K-Enterprises-Associates'
-      message: "Y K Enterprises Associates employees and their leads fetched successfully",
-      department: "Y-K-Enterprises-Associates",
+      // 📝 CHANGED: Response message and department tag updated to 'Kolhapur-Associates'
+      message: "Kolhapur Associates employees and their leads fetched successfully",
+      department: "Kolhapur-Associates",
       total_employees: data.employees.length,
       total_unassigned_leads: data.unassigned_leads.length,
       ...data,
     });
   } catch (error) {
-    console.error("Error fetching Y K Enterprises Associates leads:", error);
+    console.error("Error fetching Kolhapur Associates leads:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -472,11 +472,11 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
     const departmentId = req.user.department_id;
     const roleId = req.user.role_id;
 
-    // 📝 CHANGED: Allowed roles updated for Y K Enterprises Associates
+    // 📝 CHANGED: Allowed roles updated for Kolhapur Associates
     const allowedRoles = [
       "IpqsHead",
-      "Y-K-Enterprises-Associates-Head",
-      "Y-K-Enterprises-Associates-Employee",
+      "Kolhapur-Associates-Head",
+      "Kolhapur-Associates-Employee",
     ];
 
     if (!allowedRoles.includes(roleId)) {
@@ -546,23 +546,23 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
 };
 
 /* -------------------------- Assign lead to Employee -------------------------- */
-// 📝 CHANGED: Function name updated to assignLeadToYkEnterprisesAssociateEmployee
-export const assignLeadToYkEnterprisesAssociateEmployee = async (req, res) => {
+// 📝 CHANGED: Function name updated to assignLeadToKolhapurAssociateEmployee
+export const assignLeadToKolhapurAssociateEmployee = async (req, res) => {
   try {
-    // 📝 CHANGED: Destructured request body variables renamed for y_k_enterprises_associate
+    // 📝 CHANGED: Destructured request body variables renamed for kolhapur_associate
     const {
       lead_id,
       assigned_employee,
-      y_k_enterprises_associate_visit_date,
-      y_k_enterprises_associate_visit_time,
-      y_k_enterprises_associate_visit_priority,
-      y_k_enterprises_associate_visit_type,
+      kolhapur_associate_visit_date,
+      kolhapur_associate_visit_time,
+      kolhapur_associate_visit_priority,
+      kolhapur_associate_visit_type,
       reason,
     } = req.body;
 
     const headId = req.user.employee_id;
-    // 📝 CHANGED: Department variable set to 'Y-K-Enterprises-Associates'
-    const department = "Y-K-Enterprises-Associates";
+    // 📝 CHANGED: Department variable set to 'Kolhapur-Associates'
+    const department = "Kolhapur-Associates";
 
     if (!lead_id || !assigned_employee) {
       return res.status(400).json({
@@ -581,18 +581,18 @@ export const assignLeadToYkEnterprisesAssociateEmployee = async (req, res) => {
 
     const oldLead = existing[0];
 
-    // 📝 CHANGED: UPDATE query columns changed to y_k_enterprises_associate_*
+    // 📝 CHANGED: UPDATE query columns changed to kolhapur_associate_*
     await pool.query(
       `
       UPDATE leads
       SET 
         assigned_employee = ?,
         lead_stage = ?,
-        y_k_enterprises_associate_visit_date = ?,
-        y_k_enterprises_associate_visit_time = ?,
-        y_k_enterprises_associate_visit_priority = ?,
-        y_k_enterprises_associate_visit_type = ?,
-        y_k_enterprises_associate_visit_status = 'Pending',
+        kolhapur_associate_visit_date = ?,
+        kolhapur_associate_visit_time = ?,
+        kolhapur_associate_visit_priority = ?,
+        kolhapur_associate_visit_type = ?,
+        kolhapur_associate_visit_status = 'Pending',
         updated_at = NOW()
       WHERE lead_id = ?
       `,
@@ -600,10 +600,10 @@ export const assignLeadToYkEnterprisesAssociateEmployee = async (req, res) => {
         assigned_employee,
         department, 
         // 📝 CHANGED: Mapping body variables to query params
-        y_k_enterprises_associate_visit_date || null,
-        y_k_enterprises_associate_visit_time || null,
-        y_k_enterprises_associate_visit_priority || "Medium",
-        y_k_enterprises_associate_visit_type || "Specific",
+        kolhapur_associate_visit_date || null,
+        kolhapur_associate_visit_time || null,
+        kolhapur_associate_visit_priority || "Medium",
+        kolhapur_associate_visit_type || "Specific",
         lead_id,
       ]
     );
@@ -636,21 +636,21 @@ export const assignLeadToYkEnterprisesAssociateEmployee = async (req, res) => {
         req.user.department_id,
         req.user.role_id,
         // 📝 CHANGED: change_type string updated
-        "y_k_enterprises_associate_visit_scheduled", 
+        "kolhapur_associate_visit_scheduled", 
         // 📝 CHANGED: reason string updated
-        reason || "Y K Enterprises Associates visit scheduled",
+        reason || "Kolhapur Associates visit scheduled",
       ]
     );
 
     res.status(200).json({
       // 📝 CHANGED: Response message and payload keys updated
-      message: "Y K Enterprises Associates visit scheduled successfully",
+      message: "Kolhapur Associates visit scheduled successfully",
       lead_id,
       assigned_employee,
-      y_k_enterprises_associate_visit_date,
-      y_k_enterprises_associate_visit_time,
-      y_k_enterprises_associate_visit_priority,
-      y_k_enterprises_associate_visit_type,
+      kolhapur_associate_visit_date,
+      kolhapur_associate_visit_time,
+      kolhapur_associate_visit_priority,
+      kolhapur_associate_visit_type,
     });
   } catch (error) {
     console.error("Error scheduling visit:", error);
@@ -661,28 +661,28 @@ export const assignLeadToYkEnterprisesAssociateEmployee = async (req, res) => {
 };
 
 /* ------------------ Get Visit Details (Head & Team) ------------------ */
-// 📝 CHANGED: Function name updated to getYkEnterprisesAssociatesVisitDetails
-export const getYkEnterprisesAssociatesVisitDetails = async (req, res) => {
+// 📝 CHANGED: Function name updated to getKolhapurAssociatesVisitDetails
+export const getKolhapurAssociatesVisitDetails = async (req, res) => {
   try {
     const headId = req.user.employee_id;
     const roleId = req.user.role_id;
 
-    // 📝 CHANGED: Role check updated to 'Y-K-Enterprises-Associates-Head'
-    if (roleId !== "Y-K-Enterprises-Associates-Head") {
+    // 📝 CHANGED: Role check updated to 'Kolhapur-Associates-Head'
+    if (roleId !== "Kolhapur-Associates-Head") {
       return res.status(403).json({
-        error: "Forbidden: Only Y K Enterprises Associates Head can access visit details.",
+        error: "Forbidden: Only Kolhapur Associates Head can access visit details.",
       });
     }
 
-    // 📝 CHANGED: Query updated to select y_k_enterprises_associate_* columns and filter by stage
+    // 📝 CHANGED: Query updated to select kolhapur_associate_* columns and filter by stage
     const query = `
       SELECT 
         l.lead_id,
         l.company_name, 
         l.lead_name, 
-        l.y_k_enterprises_associate_visit_date, 
-        l.y_k_enterprises_associate_visit_time, 
-        l.y_k_enterprises_associate_visit_priority, 
+        l.kolhapur_associate_visit_date, 
+        l.kolhapur_associate_visit_time, 
+        l.kolhapur_associate_visit_priority, 
         l.assigned_employee,
         e.first_name,
         e.last_name,
@@ -690,8 +690,8 @@ export const getYkEnterprisesAssociatesVisitDetails = async (req, res) => {
       FROM leads l
       LEFT JOIN employees e 
         ON l.assigned_employee COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.lead_stage = 'Y-K-Enterprises-Associates'
-      ORDER BY l.y_k_enterprises_associate_visit_date DESC, l.y_k_enterprises_associate_visit_time ASC
+      WHERE l.lead_stage = 'Kolhapur-Associates'
+      ORDER BY l.kolhapur_associate_visit_date DESC, l.kolhapur_associate_visit_time ASC
     `;
 
     const [rows] = await pool.query(query);
@@ -708,14 +708,14 @@ export const getYkEnterprisesAssociatesVisitDetails = async (req, res) => {
         assignedPersonName = row.username;
       }
 
-      // 📝 CHANGED: Mapping Y K Enterprises database columns to JSON object
+      // 📝 CHANGED: Mapping kolhapur database columns to JSON object
       const visitData = {
         lead_id: row.lead_id,
         company_name: row.company_name,
         lead_name: row.lead_name,
-        visit_date: row.y_k_enterprises_associate_visit_date,
-        visit_time: row.y_k_enterprises_associate_visit_time,
-        visit_priority: row.y_k_enterprises_associate_visit_priority,
+        visit_date: row.kolhapur_associate_visit_date,
+        visit_time: row.kolhapur_associate_visit_time,
+        visit_priority: row.kolhapur_associate_visit_priority,
         assigned_person: assignedPersonName,
         assigned_person_username: row.username || null,
         assigned_employee_id: row.assigned_employee
@@ -730,7 +730,7 @@ export const getYkEnterprisesAssociatesVisitDetails = async (req, res) => {
 
     return res.status(200).json({
       // 📝 CHANGED: Response message updated
-      message: "Y K Enterprises Associates visit details fetched successfully",
+      message: "Kolhapur Associates visit details fetched successfully",
       total_records: rows.length,
       head_data: {
         count: headVisits.length,
@@ -749,12 +749,12 @@ export const getYkEnterprisesAssociatesVisitDetails = async (req, res) => {
 };
 
 /* ---------------- Get Unscheduled Leads ---------------- */
-// 📝 CHANGED: Function name updated to getUnscheduledYkEnterprisesAssociateLeads
-export const getUnscheduledYkEnterprisesAssociateLeads = async (req, res) => {
+// 📝 CHANGED: Function name updated to getUnscheduledKolhapurAssociateLeads
+export const getUnscheduledKolhapurAssociateLeads = async (req, res) => {
   try {
     const employeeId = req.user.employee_id;
 
-    // 📝 CHANGED: Query updated to check y_k_enterprises_associate_* columns and stage
+    // 📝 CHANGED: Query updated to check kolhapur_associate_* columns and stage
     const query = `
       SELECT 
         l.*,
@@ -767,9 +767,9 @@ export const getUnscheduledYkEnterprisesAssociateLeads = async (req, res) => {
         ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN employees creator 
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.lead_stage = 'Y-K-Enterprises-Associates'
-        AND l.y_k_enterprises_associate_visit_date IS NULL
-        AND l.y_k_enterprises_associate_visit_time IS NULL
+      WHERE l.lead_stage = 'Kolhapur-Associates'
+        AND l.kolhapur_associate_visit_date IS NULL
+        AND l.kolhapur_associate_visit_time IS NULL
         AND l.assigned_employee = ?
       ORDER BY l.created_at DESC
     `;
@@ -792,7 +792,7 @@ export const getUnscheduledYkEnterprisesAssociateLeads = async (req, res) => {
 
     return res.status(200).json({
       // 📝 CHANGED: Response message updated
-      message: "Unscheduled Y K Enterprises Associates leads fetched successfully",
+      message: "Unscheduled Kolhapur Associates leads fetched successfully",
       employee_id: employeeId,
       total_unscheduled_leads: leads.length,
       leads,
@@ -805,17 +805,17 @@ export const getUnscheduledYkEnterprisesAssociateLeads = async (req, res) => {
 };
 
 /* ---------------- Get Scheduled Visits ---------------- */
-// 📝 CHANGED: Function name updated to getScheduledYkEnterprisesAssociateVisits
-export const getScheduledYkEnterprisesAssociateVisits = async (req, res) => {
+// 📝 CHANGED: Function name updated to getScheduledKolhapurAssociateVisits
+export const getScheduledKolhapurAssociateVisits = async (req, res) => {
   try {
     const employeeId = req.user.employee_id;
     const { date } = req.query; 
 
-    // 📝 CHANGED: Query updated for y_k_enterprises_associate_visit_date format and stage
+    // 📝 CHANGED: Query updated for kolhapur_associate_visit_date format and stage
     let query = `
       SELECT 
         l.*,
-        DATE_FORMAT(l.y_k_enterprises_associate_visit_date, '%Y-%m-%d') AS y_k_enterprises_associate_visit_date,
+        DATE_FORMAT(l.kolhapur_associate_visit_date, '%Y-%m-%d') AS kolhapur_associate_visit_date,
         CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
         assignee.username AS assigned_employee_username,
         CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
@@ -825,9 +825,9 @@ export const getScheduledYkEnterprisesAssociateVisits = async (req, res) => {
         ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN employees creator 
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.lead_stage = 'Y-K-Enterprises-Associates'
+      WHERE l.lead_stage = 'Kolhapur-Associates'
         AND l.assigned_employee = ?
-        AND l.y_k_enterprises_associate_visit_date IS NOT NULL
+        AND l.kolhapur_associate_visit_date IS NOT NULL
     `;
 
     const params = [employeeId];
@@ -840,13 +840,13 @@ export const getScheduledYkEnterprisesAssociateVisits = async (req, res) => {
         });
       }
       
-      // 📝 CHANGED: Query updated to append Y K Enterprises date filter
-      query += ` AND l.y_k_enterprises_associate_visit_date = ?`;
+      // 📝 CHANGED: Query updated to append kolhapur date filter
+      query += ` AND l.kolhapur_associate_visit_date = ?`;
       params.push(date);
     }
 
-    // 📝 CHANGED: Query ORDER BY updated to use y_k_enterprises_associate columns
-    query += ` ORDER BY l.y_k_enterprises_associate_visit_date ASC, l.y_k_enterprises_associate_visit_time ASC`;
+    // 📝 CHANGED: Query ORDER BY updated to use kolhapur_associate columns
+    query += ` ORDER BY l.kolhapur_associate_visit_date ASC, l.kolhapur_associate_visit_time ASC`;
 
     const [leads] = await pool.query(query, params);
 
@@ -886,8 +886,8 @@ export const getScheduledYkEnterprisesAssociateVisits = async (req, res) => {
 };
 
 /* ---------------- Update Visit Status (Start / Complete) ---------------- */
-// 📝 CHANGED: Function name updated to updateYkEnterprisesAssociateVisitStatus
-export const updateYkEnterprisesAssociateVisitStatus = async (req, res) => {
+// 📝 CHANGED: Function name updated to updateKolhapurAssociateVisitStatus
+export const updateKolhapurAssociateVisitStatus = async (req, res) => {
   try {
     const { lead_id, status, location } = req.body;
     const employeeId = req.user.employee_id;
@@ -922,19 +922,19 @@ export const updateYkEnterprisesAssociateVisitStatus = async (req, res) => {
       if (!location) {
         return res.status(400).json({ error: "Start location is required when starting a visit." });
       }
-      // 📝 CHANGED: Database UPDATE columns mapped to y_k_enterprises_associate_*
+      // 📝 CHANGED: Database UPDATE columns mapped to kolhapur_associate_*
       query = `
         UPDATE leads 
-        SET y_k_enterprises_associate_lead_visit_status = ?, y_k_enterprises_associate_visit_start_location = ?, updated_at = NOW() 
+        SET kolhapur_associate_lead_visit_status = ?, kolhapur_associate_visit_start_location = ?, updated_at = NOW() 
         WHERE lead_id = ?
       `;
       params = [status, location, lead_id];
 
     } else {
-      // 📝 CHANGED: Database UPDATE columns mapped to y_k_enterprises_associate_*
+      // 📝 CHANGED: Database UPDATE columns mapped to kolhapur_associate_*
       query = `
         UPDATE leads 
-        SET y_k_enterprises_associate_lead_visit_status = ?, updated_at = NOW() 
+        SET kolhapur_associate_lead_visit_status = ?, updated_at = NOW() 
         WHERE lead_id = ?
       `;
       params = [status, lead_id];
@@ -942,15 +942,15 @@ export const updateYkEnterprisesAssociateVisitStatus = async (req, res) => {
 
     await pool.query(query, params);
 
-    // 📝 CHANGED: changeType logic strings updated for Y K Enterprises Associate
-    const changeType = status === "Started" ? "Y K Enterprises Associate Visit Started" :
-                       status === "Completed" ? "Y K Enterprises Associate Visit Completed" :
-                       `Y K Enterprises Associate Visit ${status}`;
+    // 📝 CHANGED: changeType logic strings updated for Kolhapur Associate
+    const changeType = status === "Started" ? "Kolhapur Associate Visit Started" :
+                       status === "Completed" ? "Kolhapur Associate Visit Completed" :
+                       `Kolhapur Associate Visit ${status}`;
 
-    // 📝 CHANGED: reasonText logic strings updated for Y K Enterprises Associates
+    // 📝 CHANGED: reasonText logic strings updated for Kolhapur Associates
     const reasonText = status === "Started" 
-      ? `Y K Enterprises Associates visit started at location: ${location}` 
-      : `Y K Enterprises Associates visit status updated to ${status}`;
+      ? `Kolhapur Associates visit started at location: ${location}` 
+      : `Kolhapur Associates visit status updated to ${status}`;
 
     await pool.query(
       `
@@ -977,7 +977,7 @@ export const updateYkEnterprisesAssociateVisitStatus = async (req, res) => {
         oldLead.assigned_employee, 
         employeeId,
         // 📝 CHANGED: Fallback department updated
-        req.user.department_id || "Y-K-Enterprises-Associates",
+        req.user.department_id || "Kolhapur-Associates",
         req.user.role_id,
         changeType,
         reasonText
@@ -998,13 +998,13 @@ export const updateYkEnterprisesAssociateVisitStatus = async (req, res) => {
 };
 
 /* ---------------- Reschedule Visit ---------------- */
-// 📝 CHANGED: Function name updated to rescheduleYkEnterprisesAssociateVisits
-export const rescheduleYkEnterprisesAssociateVisits = async (req, res) => {
+// 📝 CHANGED: Function name updated to rescheduleKolhapurAssociateVisits
+export const rescheduleKolhapurAssociateVisits = async (req, res) => {
   try {
     const { lead_id, new_visit_date, new_visit_time, reason } = req.body;
     const employeeId = req.user.employee_id;
     // 📝 CHANGED: Fallback department updated
-    const departmentId = req.user.department_id || "Y-K-Enterprises-Associates";
+    const departmentId = req.user.department_id || "Kolhapur-Associates";
 
     if (!lead_id || !new_visit_date || !new_visit_time) {
       return res.status(400).json({ 
@@ -1012,9 +1012,9 @@ export const rescheduleYkEnterprisesAssociateVisits = async (req, res) => {
       });
     }
 
-    // 📝 CHANGED: Selected columns updated to y_k_enterprises_associate_*
+    // 📝 CHANGED: Selected columns updated to kolhapur_associate_*
     const [existing] = await pool.query(
-      "SELECT assigned_employee, lead_stage, y_k_enterprises_associate_visit_date, y_k_enterprises_associate_visit_time FROM leads WHERE lead_id = ?",
+      "SELECT assigned_employee, lead_stage, kolhapur_associate_visit_date, kolhapur_associate_visit_time FROM leads WHERE lead_id = ?",
       [lead_id]
     );
 
@@ -1031,19 +1031,19 @@ export const rescheduleYkEnterprisesAssociateVisits = async (req, res) => {
     }
 
     // 📝 CHANGED: Read from correct object properties
-    const oldDate = oldLead.y_k_enterprises_associate_visit_date 
-      ? new Date(oldLead.y_k_enterprises_associate_visit_date).toISOString().split('T')[0] 
+    const oldDate = oldLead.kolhapur_associate_visit_date 
+      ? new Date(oldLead.kolhapur_associate_visit_date).toISOString().split('T')[0] 
       : "Unscheduled";
-    const oldTime = oldLead.y_k_enterprises_associate_visit_time || "Unscheduled";
+    const oldTime = oldLead.kolhapur_associate_visit_time || "Unscheduled";
 
-    // 📝 CHANGED: UPDATE query columns updated to y_k_enterprises_associate_*
+    // 📝 CHANGED: UPDATE query columns updated to kolhapur_associate_*
     await pool.query(
       `
       UPDATE leads 
       SET 
-        y_k_enterprises_associate_visit_date = ?, 
-        y_k_enterprises_associate_visit_time = ?, 
-        y_k_enterprises_associate_lead_visit_status = 'Pending', 
+        kolhapur_associate_visit_date = ?, 
+        kolhapur_associate_visit_time = ?, 
+        kolhapur_associate_lead_visit_status = 'Pending', 
         updated_at = NOW() 
       WHERE lead_id = ?
       `,
@@ -1079,14 +1079,14 @@ export const rescheduleYkEnterprisesAssociateVisits = async (req, res) => {
         departmentId,
         req.user.role_id,
         // 📝 CHANGED: Backup log reason updated
-        "Y K Enterprises Associate Visit Rescheduled",
+        "Kolhapur Associate Visit Rescheduled",
         reasonText.trim()
       ]
     );
 
     return res.status(200).json({
       // 📝 CHANGED: Response message updated
-      message: "Y K Enterprises Associates visit rescheduled successfully.",
+      message: "Kolhapur Associates visit rescheduled successfully.",
       lead_id,
       new_visit_date,
       new_visit_time,
@@ -1100,29 +1100,30 @@ export const rescheduleYkEnterprisesAssociateVisits = async (req, res) => {
   }
 };
 
+
 /* ---------------- Get Completed Leads ---------------- */
-// 📝 CHANGED: Function name updated to getCompletedYkEnterprisesAssociateVisits
-export const getCompletedYkEnterprisesAssociateVisits = async (req, res) => {
+// 📝 CHANGED: Function name updated to getCompletedKolhapurAssociateVisits
+export const getCompletedKolhapurAssociateVisits = async (req, res) => {
   try {
     const roleId = req.user.role_id;
     const employeeId = req.user.employee_id;
 
     // 📝 CHANGED: Allowed roles updated
-    const allowedRoles = ["Y-K-Enterprises-Associates-Head", "Y-K-Enterprises-Associates-Employee"];
+    const allowedRoles = ["Kolhapur-Associates-Head", "Kolhapur-Associates-Employee"];
     if (!allowedRoles.includes(roleId)) {
       return res.status(403).json({
-        error: "Forbidden: Only Y K Enterprises Associates Team members can access this data.",
+        error: "Forbidden: Only Kolhapur Associates Team members can access this data.",
       });
     }
 
     let query = "";
     let params = [];
 
-    // 📝 CHANGED: JOIN condition mapped to check for 'Y K Enterprises Associate Visit Completed'
+    // 📝 CHANGED: JOIN condition mapped to check for 'Kolhapur Associate Visit Completed'
     const baseJoins = `
       FROM leads l
       LEFT JOIN lead_activity_backup lab 
-        ON l.lead_id = lab.lead_id AND lab.change_type = 'Y K Enterprises Associate Visit Completed'
+        ON l.lead_id = lab.lead_id AND lab.change_type = 'Kolhapur Associate Visit Completed'
       LEFT JOIN employees e 
         ON lab.changed_by COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
     `;
@@ -1135,21 +1136,21 @@ export const getCompletedYkEnterprisesAssociateVisits = async (req, res) => {
       e.username
     `;
 
-    // 📝 CHANGED: Role check condition updated to 'Y-K-Enterprises-Associates-Head'
-    if (roleId === "Y-K-Enterprises-Associates-Head") {
+    // 📝 CHANGED: Role check condition updated to 'Kolhapur-Associates-Head'
+    if (roleId === "Kolhapur-Associates-Head") {
       query = `
         SELECT ${selectFields}
         ${baseJoins}
-        -- 📝 CHANGED: WHERE condition checks y_k_enterprises_associate_lead_visit_status
-        WHERE l.y_k_enterprises_associate_lead_visit_status = 'Completed'
+        -- 📝 CHANGED: WHERE condition checks kolhapur_associate_lead_visit_status
+        WHERE l.kolhapur_associate_lead_visit_status = 'Completed'
         ORDER BY l.updated_at DESC
       `;
     } else {
       query = `
         SELECT DISTINCT ${selectFields}
         ${baseJoins}
-        -- 📝 CHANGED: WHERE condition checks y_k_enterprises_associate_lead_visit_status
-        WHERE l.y_k_enterprises_associate_lead_visit_status = 'Completed'
+        -- 📝 CHANGED: WHERE condition checks kolhapur_associate_lead_visit_status
+        WHERE l.kolhapur_associate_lead_visit_status = 'Completed'
         AND (lab.changed_by = ? OR lab.old_assigned_employee = ?)
         ORDER BY l.updated_at DESC
       `;
@@ -1178,9 +1179,9 @@ export const getCompletedYkEnterprisesAssociateVisits = async (req, res) => {
 
     return res.status(200).json({
       // 📝 CHANGED: Response message updated
-      message: "Completed Y K Enterprises Associates visits fetched successfully",
+      message: "Completed Kolhapur Associates visits fetched successfully",
       // 📝 CHANGED: Role check in response object updated
-      view_mode: roleId === "Y-K-Enterprises-Associates-Head" ? "All Team Data" : "Personal History",
+      view_mode: roleId === "Kolhapur-Associates-Head" ? "All Team Data" : "Personal History",
       total: leads.length,
       leads,
     });
@@ -1191,15 +1192,15 @@ export const getCompletedYkEnterprisesAssociateVisits = async (req, res) => {
 };
 
 /* ---------------- Today's Visits (All Employees) ---------------- */
-// 📝 CHANGED: Function name updated to YkEnterprisesAssociateTeamTodaysVisits
-export const YkEnterprisesAssociateTeamTodaysVisits = async (req, res) => {
+// 📝 CHANGED: Function name updated to KolhapurAssociateTeamTodaysVisits
+export const KolhapurAssociateTeamTodaysVisits = async (req, res) => {
   try {
     const roleId = req.user.role_id;
 
-    // 📝 CHANGED: Role check updated to include 'Y-K-Enterprises-Associates-Head'
-    if (!["Y-K-Enterprises-Associates-Head", "IpqsHead"].includes(roleId)) {
+    // 📝 CHANGED: Role check updated to include 'Kolhapur-Associates-Head'
+    if (!["Kolhapur-Associates-Head", "IpqsHead"].includes(roleId)) {
       return res.status(403).json({
-        error: "Forbidden: Only Y K Enterprises Associates Head or IpqsHead can access this.",
+        error: "Forbidden: Only Kolhapur Associates Head or IpqsHead can access this.",
       });
     }
 
@@ -1210,19 +1211,19 @@ export const YkEnterprisesAssociateTeamTodaysVisits = async (req, res) => {
       targetDate = new Date(localDate - tzOffset).toISOString().split('T')[0];
     }
     
-    // 📝 CHANGED: Query updated to search for '%Y-K-Enterprises-Associates%' departments
+    // 📝 CHANGED: Query updated to search for '%Kolhapur-Associates%' departments
     const [employees] = await pool.query(
       `SELECT employee_id, first_name, last_name, username, email, department_id 
        FROM employees 
-       WHERE department_id LIKE '%Y-K-Enterprises-Associates%' AND status = 'active'`
+       WHERE department_id LIKE '%Kolhapur-Associates%' AND status = 'active'`
     );
     
-    // 📝 CHANGED: Query updated to check y_k_enterprises_associate_visit_date and lead_stage
+    // 📝 CHANGED: Query updated to check kolhapur_associate_visit_date and lead_stage
     const [leads] = await pool.query(
       `SELECT * FROM leads 
-       WHERE lead_stage LIKE '%Y-K-Enterprises-Associates%' 
-       AND y_k_enterprises_associate_visit_date = ? 
-       ORDER BY y_k_enterprises_associate_visit_time ASC`,
+       WHERE lead_stage LIKE '%Kolhapur-Associates%' 
+       AND kolhapur_associate_visit_date = ? 
+       ORDER BY kolhapur_associate_visit_time ASC`,
       [targetDate]
     );
     
@@ -1262,10 +1263,10 @@ export const YkEnterprisesAssociateTeamTodaysVisits = async (req, res) => {
 
     res.status(200).json({
       // 📝 CHANGED: Response message and department tag updated
-      message: `Y K Enterprises Associates visits for ${targetDate} fetched successfully`,
+      message: `Kolhapur Associates visits for ${targetDate} fetched successfully`,
       date: targetDate, 
       accessed_by: roleId,
-      department: "Y-K-Enterprises-Associates",
+      department: "Kolhapur-Associates",
       total_employees: employeeData.length,
       total_unassigned_todays_visits: unassigned_leads.length,
       employees: employeeData,
@@ -1282,13 +1283,13 @@ export const YkEnterprisesAssociateTeamTodaysVisits = async (req, res) => {
 // Dashboard Hot Leads API
 
 /* ---------------- Get Hot Leads (Role-Based) ---------------- */
-// 📝 CHANGED: Function name updated to getHotYkEnterprisesAssociateLeads
-export const getHotYkEnterprisesAssociateLeads = async (req, res) => {
+// 📝 CHANGED: Function name updated to getHotKolhapurAssociateLeads
+export const getHotKolhapurAssociateLeads = async (req, res) => {
   try {
     const roleId = req.user.role_id;
     const employeeId = req.user.employee_id;
 
-    // 📝 CHANGED: WHERE condition updated for 'Y-K-Enterprises-Associates' lead stage
+    // 📝 CHANGED: WHERE condition updated for 'Kolhapur-Associates' lead stage
     let query = `
       SELECT 
         l.*,
@@ -1301,14 +1302,14 @@ export const getHotYkEnterprisesAssociateLeads = async (req, res) => {
         ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN employees creator 
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.lead_stage = 'Y-K-Enterprises-Associates'
+      WHERE l.lead_stage = 'Kolhapur-Associates'
         AND (l.mark_as_hot_lead = 1 OR l.mark_as_hot_lead = TRUE)
     `;
 
     const params = [];
 
     // 📝 CHANGED: Head roles check array updated
-    const headRoles = ["Y-K-Enterprises-Associates-Head", "IpqsHead"];
+    const headRoles = ["Kolhapur-Associates-Head", "IpqsHead"];
     if (!headRoles.includes(roleId)) {
       query += ` AND l.assigned_employee = ?`;
       params.push(employeeId);
@@ -1346,29 +1347,29 @@ export const getHotYkEnterprisesAssociateLeads = async (req, res) => {
 };
 
 /* ---------------- Get Employees & Detailed Expected Revenue ---------------- */
-// 📝 CHANGED: Function name updated to getYkEnterprisesAssociatesEmployeesRevenue
-export const getYkEnterprisesAssociatesEmployeesRevenue = async (req, res) => {
+// 📝 CHANGED: Function name updated to getKolhapurAssociatesEmployeesRevenue
+export const getKolhapurAssociatesEmployeesRevenue = async (req, res) => {
   try {
     const roleId = req.user.role_id;
     
     // 📝 CHANGED: Allowed roles updated
-    const allowedRoles = ["Y-K-Enterprises-Associates-Head", "Y-K-Enterprises-Associates-Employee", "IpqsHead"];
+    const allowedRoles = ["Kolhapur-Associates-Head", "Kolhapur-Associates-Employee", "IpqsHead"];
     if (!allowedRoles.includes(roleId)) {
       return res.status(403).json({ 
         error: "Forbidden: Only authorized Heads can access this data." 
       });
     }
 
-    // 📝 CHANGED: Query updated to fetch 'Y-K-Enterprises-Associates' employees
+    // 📝 CHANGED: Query updated to fetch 'Kolhapur-Associates' employees
     const empQuery = `
       SELECT 
         employee_id, first_name, last_name, username, email, contact_number
       FROM employees
-      WHERE department_id = 'Y-K-Enterprises-Associates' AND status = 'active'
+      WHERE department_id = 'Kolhapur-Associates' AND status = 'active'
     `;
     const [employees] = await pool.query(empQuery);
 
-    // 📝 CHANGED: Query updated to check y_k_enterprises_associate_lead_visit_status and change_type
+    // 📝 CHANGED: Query updated to check kolhapur_associate_lead_visit_status and change_type
     const leadsQuery = `
       SELECT 
         lab.old_assigned_employee AS employee_id,
@@ -1378,8 +1379,8 @@ export const getYkEnterprisesAssociatesEmployeesRevenue = async (req, res) => {
         COALESCE(l.expected_revenue, 0) AS expected_revenue
       FROM lead_activity_backup lab
       INNER JOIN leads l ON lab.lead_id = l.lead_id
-      WHERE lab.change_type = 'Y K Enterprises Associate Visit Completed'
-        AND l.y_k_enterprises_associate_lead_visit_status = 'Completed'
+      WHERE lab.change_type = 'Kolhapur Associate Visit Completed'
+        AND l.kolhapur_associate_lead_visit_status = 'Completed'
     `;
     const [leads] = await pool.query(leadsQuery);
 
@@ -1422,7 +1423,7 @@ export const getYkEnterprisesAssociatesEmployeesRevenue = async (req, res) => {
 
     return res.status(200).json({
       // 📝 CHANGED: Response message updated
-      message: "Y K Enterprises Associates employees and detailed revenue fetched successfully",
+      message: "Kolhapur Associates employees and detailed revenue fetched successfully",
       total_employees: results.length,
       total_expected_revenue_all_employees: totalExpectedRevenueAllEmployees, 
       data: results
@@ -1440,22 +1441,22 @@ export const getNewAssignedLeadsSummary = async (req, res) => {
     const roleId = req.user.role_id;
     
     // 📝 CHANGED: Allowed roles updated
-    const allowedRoles = ["Y-K-Enterprises-Associates-Head", "Y-K-Enterprises-Associates-Employee", "IpqsHead"];
+    const allowedRoles = ["Kolhapur-Associates-Head", "Kolhapur-Associates-Employee", "IpqsHead"];
     if (!allowedRoles.includes(roleId)) {
       return res.status(403).json({ 
         error: "Forbidden: Only authorized Heads can access this data." 
       });
     }
 
-    // 📝 CHANGED: Query updated to fetch 'Y-K-Enterprises-Associates' employees
+    // 📝 CHANGED: Query updated to fetch 'Kolhapur-Associates' employees
     const empQuery = `
       SELECT employee_id, first_name, last_name, username 
       FROM employees 
-      WHERE department_id = 'Y-K-Enterprises-Associates' AND status = 'active'
+      WHERE department_id = 'Kolhapur-Associates' AND status = 'active'
     `;
     const [employees] = await pool.query(empQuery);
 
-    // 📝 CHANGED: Query updated for lead_stage 'Y-K-Enterprises-Associates'
+    // 📝 CHANGED: Query updated for lead_stage 'Kolhapur-Associates'
     const leadsQuery = `
       SELECT 
         l.lead_id, 
@@ -1470,7 +1471,7 @@ export const getNewAssignedLeadsSummary = async (req, res) => {
           l.created_at
         ) AS assigned_on
       FROM leads l
-      WHERE l.lead_stage = 'Y-K-Enterprises-Associates' 
+      WHERE l.lead_stage = 'Kolhapur-Associates' 
         AND l.lead_status = 'new'
     `;
     const [leads] = await pool.query(leadsQuery);
@@ -1542,26 +1543,26 @@ export const getSalesFunnel = async (req, res) => {
     const roleId = req.user.role_id;
     const employeeId = req.user.employee_id;
 
-    // 📝 CHANGED: Role check updated to check for 'Y-K-Enterprises-Associates-Head'
-    const isHead = ["Y-K-Enterprises-Associates-Head", "IpqsHead"].includes(roleId);
+    // 📝 CHANGED: Role check updated to check for 'Kolhapur-Associates-Head'
+    const isHead = ["Kolhapur-Associates-Head", "IpqsHead"].includes(roleId);
     const params = isHead ? [] : [employeeId, employeeId];
 
-    // 📝 CHANGED: Query updated to pull y_k_enterprises_associate_* fields and check stage
+    // 📝 CHANGED: Query updated to pull kolhapur_associate_* fields and check stage
     const funnelQuery = `
       SELECT 
         l.lead_id, 
-        l.y_k_enterprises_associate_visit_date, 
-        l.y_k_enterprises_associate_lead_visit_status, 
+        l.kolhapur_associate_visit_date, 
+        l.kolhapur_associate_lead_visit_status, 
         l.lead_stage
       FROM leads l
       WHERE 
-        (l.lead_stage = 'Y-K-Enterprises-Associates' ${isHead ? "" : "AND l.assigned_employee = ?"})
+        (l.lead_stage = 'Kolhapur-Associates' ${isHead ? "" : "AND l.assigned_employee = ?"})
         OR 
         l.lead_id IN (
           SELECT lead_id 
           FROM lead_activity_backup 
-          WHERE old_lead_stage = 'Y-K-Enterprises-Associates' 
-            AND new_lead_stage != 'Y-K-Enterprises-Associates'
+          WHERE old_lead_stage = 'Kolhapur-Associates' 
+            AND new_lead_stage != 'Kolhapur-Associates'
             ${isHead ? "" : "AND old_assigned_employee = ?"}
         )
     `;
@@ -1574,16 +1575,16 @@ export const getSalesFunnel = async (req, res) => {
     let transferredVisits = 0;
 
     funnelLeads.forEach((lead) => {
-      // 📝 CHANGED: Accessing the specific date column mapped to Y K Enterprises
-      if (lead.y_k_enterprises_associate_visit_date) {
+      // 📝 CHANGED: Accessing the specific date column mapped to Kolhapur
+      if (lead.kolhapur_associate_visit_date) {
         scheduledVisits++;
       }
-      // 📝 CHANGED: Accessing the specific status column mapped to Y K Enterprises
-      if (lead.y_k_enterprises_associate_lead_visit_status === 'Completed') {
+      // 📝 CHANGED: Accessing the specific status column mapped to Kolhapur
+      if (lead.kolhapur_associate_lead_visit_status === 'Completed') {
         completedVisits++;
       }
       // 📝 CHANGED: Checking lead stage transfer logic
-      if (lead.lead_stage !== 'Y-K-Enterprises-Associates') {
+      if (lead.lead_stage !== 'Kolhapur-Associates') {
         transferredVisits++;
       }
     });

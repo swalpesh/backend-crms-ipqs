@@ -34,6 +34,7 @@ import silverlineassociateleadRoutes from "./routes/silverlineassociateleads.rou
 import trafoassociateleadRoutes from "./routes/trafoassociateleads.routes.js";
 //CHANGED: Imported new Y K Enterprises Associates routes
 import ykenterprisesassociateleadRoutes from "./routes/ykenterprisesassociateleads.routes.js";
+import kolhapurassociateleadRoutes from "./routes/kolhapurassociateleads.routes.js";
 
 
 /* ------------------------------ Config ------------------------------ */
@@ -130,6 +131,7 @@ app.use("/api/taleads", trafoassociateleadRoutes);
 
 // 📝 CHANGED: Registered new endpoint for Y K Enterprises Associates
 app.use("/api/ykaleads", ykenterprisesassociateleadRoutes);
+app.use("/api/kaleads", kolhapurassociateleadRoutes);
 
 app.use("/api/tleads", TechnicalleadRoutes);
 app.use("/api/sleads", SolutionsleadRoutes);
