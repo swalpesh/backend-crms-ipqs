@@ -35,6 +35,7 @@ import trafoassociateleadRoutes from "./routes/trafoassociateleads.routes.js";
 //CHANGED: Imported new Y K Enterprises Associates routes
 import ykenterprisesassociateleadRoutes from "./routes/ykenterprisesassociateleads.routes.js";
 import kolhapurassociateleadRoutes from "./routes/kolhapurassociateleads.routes.js";
+import consultationRoutes from "./routes/consultations.routes.js";
 
 
 /* ------------------------------ Config ------------------------------ */
@@ -139,6 +140,7 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/oms-callback", omsCallbackRoutes);
 app.use("/api/reimbursements", reimbursementRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/consultations", consultationRoutes);
 
 /* ----------------------------- Error Handler ----------------------------- */
 app.use((err, _req, res, _next) => {
