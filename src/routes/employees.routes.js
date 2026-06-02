@@ -16,7 +16,12 @@ import {
   getSolutionTeamEmployees,
   getQuotationTeamEmployees,
   getTechnicalTeamEmployees,
-  getMyTripStatus
+  getMyTripStatus,
+  getKolhapurAssociatesEmployees,
+  getNagpurAssociatesEmployees,
+  getSilverlineAssociatesEmployees,
+  getTrafoAssociatesEmployees,
+  getYKEnterprisesAssociatesEmployees
 } from "../controllers/employees.controller.js";
 import {
   loginEmployee,
@@ -95,6 +100,11 @@ router.get("/department/corporate-marketing", requireAuth, getCorporateMarketing
 router.get("/department/technical-team", requireAuth, getTechnicalTeamEmployees);
 router.get("/department/quotation-team", requireAuth, getQuotationTeamEmployees);
 router.get("/department/solution-team", requireAuth, getSolutionTeamEmployees);
+router.get("/department/kolhapur-associates", requireAuth, getKolhapurAssociatesEmployees);
+router.get("/department/nagpur-associates", requireAuth, getNagpurAssociatesEmployees);
+router.get("/department/silverline-associates", requireAuth, getSilverlineAssociatesEmployees);
+router.get("/department/trafo-associates", requireAuth, getTrafoAssociatesEmployees);
+router.get("/department/y-k-enterprises-associates", requireAuth, getYKEnterprisesAssociatesEmployees);
 
 router.get("/my-trip-status", requireAuth, getMyTripStatus);
 

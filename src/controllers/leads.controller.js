@@ -23,9 +23,26 @@ function isTeleHead(user) {
 
 /* --------------------- Auto-generate Lead ID (L-001…) ------------------- */
 async function generateLeadId() {
-  const [rows] = await pool.query("SELECT COUNT(*) as count FROM leads");
-  const next = rows[0].count + 1;
-  return `L-${String(next).padStart(3, "0")}`;
+  // Fetch the absolute highest lead_id currently in the database
+  const [lastLeadData] = await pool.query(
+    `SELECT lead_id 
+     FROM leads 
+     WHERE lead_id LIKE 'L-%' 
+     ORDER BY CAST(SUBSTRING(lead_id, 3) AS UNSIGNED) DESC 
+     LIMIT 1`
+  );
+
+  let nextNumber = 1;
+
+  if (lastLeadData.length > 0) {
+    const lastId = lastLeadData[0].lead_id; // e.g., 'L-184'
+    // Extract the number part, parse it to an integer, and add 1
+    const lastNumber = parseInt(lastId.split('-')[1], 10);
+    nextNumber = lastNumber + 1;
+  }
+
+  // Returns L-185 (or pads with zeros for low numbers like L-001)
+  return `L-${String(nextNumber).padStart(3, "0")}`;
 }
 
 /* -------------------------------- Create -------------------------------- */
@@ -1566,5 +1583,71 @@ export const getConfirmedRevenueAnalytics = async (req, res) => {
   } catch (error) {
     console.error("Error fetching revenue analytics:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* DELETE MULTIPLE LEADS (Admin Only - Deletes from ALL related tables)       */
+/* -------------------------------------------------------------------------- */
+export const deleteMultipleLeads = async (req, res) => {
+  // We MUST use a single connection for transactions, not the generic pool
+  const connection = await pool.getConnection(); 
+
+  try {
+    const { lead_ids } = req.body;
+    const roleId = req.user.role_id;
+
+    // 1. Security Check: Restrict to Admin (IpqsHead)
+    if (roleId !== "IpqsHead") {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Admin (IpqsHead) can delete leads." 
+      });
+    }
+
+    // 2. Validation
+    if (!lead_ids || !Array.isArray(lead_ids) || lead_ids.length === 0) {
+      return res.status(400).json({ 
+        error: "Please provide an array of lead_ids to delete." 
+      });
+    }
+
+    // 3. Start the Transaction
+    await connection.beginTransaction();
+
+    // 4. Delete from all Child Tables First!
+    // (Order is important to prevent Foreign Key constraint errors)
+    
+    // -> Activity Backup
+    await connection.query(`DELETE FROM lead_activity_backup WHERE lead_id IN (?)`, [lead_ids]);
+    
+    // -> Main Lead Attachments
+    await connection.query(`DELETE FROM lead_attachments WHERE lead_id IN (?)`, [lead_ids]);
+
+    // -> Discussions
+    await connection.query(`DELETE FROM lead_discussions WHERE lead_id IN (?)`, [lead_ids]);
+
+    // -> Notes
+    await connection.query(`DELETE FROM lead_notes WHERE lead_id IN (?)`, [lead_ids]);
+
+    // 5. Finally, Delete the Actual Parent Leads
+    const [result] = await connection.query(`DELETE FROM leads WHERE lead_id IN (?)`, [lead_ids]);
+
+    // 6. If everything succeeded, COMMIT the transaction to permanently save changes
+    await connection.commit();
+
+    return res.status(200).json({
+      message: `Successfully deleted ${result.affectedRows} leads and wiped all associated data from 7 tables.`,
+      deleted_leads: lead_ids
+    });
+
+  } catch (error) {
+    // 💥 If ANYTHING fails, undo all the deletions instantly!
+    await connection.rollback();
+    console.error("Error during bulk delete:", error);
+    res.status(500).json({ error: "Server error while deleting leads." });
+  } finally {
+    // Always release the connection back to the pool so your server doesn't crash
+    connection.release();
   }
 };

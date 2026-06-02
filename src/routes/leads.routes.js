@@ -26,7 +26,8 @@ import {
   updateQuotationCreatedStatus,
   getLeadOriginInfo,
   updatePoConfirmedStatus,
-  getConfirmedRevenueAnalytics
+  getConfirmedRevenueAnalytics,
+  deleteMultipleLeads
 } from "../controllers/leads.controller.js";
 
 
@@ -127,6 +128,7 @@ router.get(
   getAllLeadsForIpqsHead
 );
 router.get("/my-accessible-leads", requireAuth, getAccessibleLeads);
+router.delete("/bulk-delete", requireAuth, deleteMultipleLeads);
 
 router.get("/:lead_id", requireAuth, getLeadById);
 router.put("/:lead_id", requireAuth, updateLeadById);
@@ -136,6 +138,8 @@ router.get("/:lead_id/notes", requireAuth, getLeadNotes);
 router.get("/:id/followup-history", getFollowupHistoryByLead);
 
 router.get("/:lead_id/origin", requireAuth, getLeadOriginInfo);
+
+
 
 
 
