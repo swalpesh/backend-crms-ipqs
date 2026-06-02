@@ -21,6 +21,8 @@
     "express-validator": "^7.2.1",
     "helmet": "^8.1.0",
     "jsonwebtoken": "^9.0.2",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "morgan": "^1.10.1",
     "multer": "^2.0.2",
     "mysql2": "^3.15.0",

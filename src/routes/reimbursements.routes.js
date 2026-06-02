@@ -7,7 +7,11 @@ import {
   getMyReimbursements,
   addReimbursementExpense,
   getReimbursementExpenses,
-  getReimbursementSummary // <-- Imported the new GET controller
+  getReimbursementSummary, 
+  getAllReimbursementsForAdmin,
+  getReimbursementDetails,
+  processReimbursementExpenses,
+  deleteReimbursement
 } from "../controllers/reimbursements.controller.js";
 
 const router = express.Router();
@@ -30,6 +34,9 @@ const upload = multer({ storage: storage });
 // GET: Fetch the logged-in employee's reimbursements
 router.get("/", requireAuth, getMyReimbursements);
 
+router.put("/process-expenses", requireAuth, processReimbursementExpenses);
+
+
 // POST: Create a new reimbursement trip
 router.post("/", requireAuth, createReimbursement);
 
@@ -45,4 +52,12 @@ router.get("/:id/expenses", requireAuth, getReimbursementExpenses);
 router.post("/expenses", requireAuth, upload.single("file"), addReimbursementExpense);
 
 router.get("/summary", requireAuth, getReimbursementSummary);
+
+router.get("/admin/all", requireAuth, getAllReimbursementsForAdmin);
+
+router.get("/:id", requireAuth, getReimbursementDetails);
+
+router.delete("/:id", requireAuth, deleteReimbursement);
+
+
 export default router;
