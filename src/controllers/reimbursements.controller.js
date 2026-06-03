@@ -739,3 +739,178 @@ export const deleteReimbursement = async (req, res) => {
     connection.release();
   }
 };
+
+
+/* -------------------------------------------------------------------------- */
+/* ADMIN: ISSUE ADVANCE MONEY FOR A TRIP                                      */
+/* -------------------------------------------------------------------------- */
+export const issueAdvanceMoney = async (req, res) => {
+  try {
+    const { id: reimbursement_id } = req.params;
+    const { advance_amount } = req.body;
+    const roleId = req.user.role_id;
+
+    // 1. Security Check: Restrict to Admins
+    
+
+    // 2. Validation
+    if (advance_amount === undefined || isNaN(advance_amount) || advance_amount < 0) {
+      return res.status(400).json({ 
+        error: "Please provide a valid positive number for advance_amount." 
+      });
+    }
+
+    // 3. Update the database
+    const [result] = await pool.query(
+      `UPDATE reimbursements 
+       SET advance_amount = ?, updated_at = NOW() 
+       WHERE reimbursement_id = ?`,
+      [parseFloat(advance_amount), reimbursement_id]
+    );
+
+    // 4. Check if the trip actually exists
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Reimbursement trip not found." });
+    }
+
+    // 5. Return Success
+    return res.status(200).json({
+      message: `Advance money of ₹${advance_amount} successfully issued for trip ${reimbursement_id}.`,
+      reimbursement_id,
+      advance_amount: parseFloat(advance_amount)
+    });
+
+  } catch (error) {
+    console.error("Error issuing advance money:", error);
+    res.status(500).json({ error: "Server error while issuing advance money." });
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* GET ADVANCE MONEY FOR A SPECIFIC TRIP                                      */
+/* -------------------------------------------------------------------------- */
+export const getAdvanceMoney = async (req, res) => {
+  try {
+    const { id: reimbursement_id } = req.params;
+    const { role_id, employee_id } = req.user;
+
+    // 1. Fetch the advance amount from the database
+    const [rows] = await pool.query(
+      `SELECT advance_amount, employee_id 
+       FROM reimbursements 
+       WHERE reimbursement_id = ?`,
+      [reimbursement_id]
+    );
+
+    // 2. Check if the trip exists
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Reimbursement trip not found." });
+    }
+
+    const trip = rows[0];
+
+    // 3. Security Check: Only Admins OR the trip owner can view this
+    const allowedRoles = ["Reimbursement-Head", "IpqsHead"];
+    if (!allowedRoles.includes(role_id) && trip.employee_id !== employee_id) {
+      return res.status(403).json({ 
+        error: "Forbidden: You do not have permission to view this data." 
+      });
+    }
+
+    // 4. Return Success
+    return res.status(200).json({
+      message: "Advance amount fetched successfully.",
+      reimbursement_id,
+      advance_amount: parseFloat(trip.advance_amount) || 0
+    });
+
+  } catch (error) {
+    console.error("Error fetching advance money:", error);
+    res.status(500).json({ error: "Server error while fetching advance money." });
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* ADMIN: POST/UPDATE FINAL APPROVED AMOUNT FOR A TRIP                        */
+/* -------------------------------------------------------------------------- */
+export const updateTripApprovedAmount = async (req, res) => {
+  try {
+    const { id: reimbursement_id } = req.params;
+    const { approved_amount } = req.body;
+    const roleId = req.user.role_id;
+
+    // 1. Security Check: Restrict to Admins
+    const allowedRoles = ["Reimbursement-Head", "IpqsHead"];
+    if (!allowedRoles.includes(roleId)) {
+      return res.status(403).json({ 
+        error: "Forbidden: Only authorized Heads can approve total trip amounts." 
+      });
+    }
+
+    // 2. Validation
+    if (approved_amount === undefined || isNaN(approved_amount) || approved_amount < 0) {
+      return res.status(400).json({ 
+        error: "Please provide a valid positive number for approved_amount." 
+      });
+    }
+
+    // 3. Update the Database
+    const [result] = await pool.query(
+      `UPDATE reimbursements 
+       SET approved_amount = ?, updated_at = NOW() 
+       WHERE reimbursement_id = ?`,
+      [parseFloat(approved_amount), reimbursement_id]
+    );
+
+    // 4. Check if the trip exists
+    if (result.affectedRows === 0) {
+      return res.status(404).json({ error: "Reimbursement trip not found." });
+    }
+
+    // 5. Return Success
+    return res.status(200).json({
+      message: `Final approved amount of ₹${approved_amount} saved for trip ${reimbursement_id}.`,
+      reimbursement_id,
+      approved_amount: parseFloat(approved_amount)
+    });
+
+  } catch (error) {
+    console.error("Error updating approved amount:", error);
+    res.status(500).json({ error: "Server error while saving approved amount." });
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* GET FINAL APPROVED AMOUNT FOR A TRIP (Viewable by Any Employee)            */
+/* -------------------------------------------------------------------------- */
+export const getTripApprovedAmount = async (req, res) => {
+  try {
+    const { id: reimbursement_id } = req.params;
+
+    // 1. Fetch the approved amount from the database
+    const [rows] = await pool.query(
+      `SELECT reimbursement_id, approved_amount 
+       FROM reimbursements 
+       WHERE reimbursement_id = ?`,
+      [reimbursement_id]
+    );
+
+    // 2. Check if the trip exists
+    if (rows.length === 0) {
+      return res.status(404).json({ error: "Reimbursement trip not found." });
+    }
+
+    // 3. Return Success (Notice there is no ownership check here, allowing any employee to view)
+    return res.status(200).json({
+      message: "Approved amount fetched successfully.",
+      reimbursement_id: rows[0].reimbursement_id,
+      approved_amount: parseFloat(rows[0].approved_amount) || 0
+    });
+
+  } catch (error) {
+    console.error("Error fetching approved amount:", error);
+    res.status(500).json({ error: "Server error while fetching approved amount." });
+  }
+};

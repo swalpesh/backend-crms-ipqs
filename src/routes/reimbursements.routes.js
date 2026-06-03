@@ -11,7 +11,11 @@ import {
   getAllReimbursementsForAdmin,
   getReimbursementDetails,
   processReimbursementExpenses,
-  deleteReimbursement
+  deleteReimbursement,
+  issueAdvanceMoney,
+  getAdvanceMoney,
+  updateTripApprovedAmount,
+  getTripApprovedAmount
 } from "../controllers/reimbursements.controller.js";
 
 const router = express.Router();
@@ -58,6 +62,11 @@ router.get("/admin/all", requireAuth, getAllReimbursementsForAdmin);
 router.get("/:id", requireAuth, getReimbursementDetails);
 
 router.delete("/:id", requireAuth, deleteReimbursement);
+
+router.put("/:id/advance", requireAuth, issueAdvanceMoney);
+router.get("/:id/advance", requireAuth, getAdvanceMoney);
+router.put("/:id/approve-amount", requireAuth, updateTripApprovedAmount);
+router.get("/:id/approve-amount", requireAuth, getTripApprovedAmount);
 
 
 export default router;

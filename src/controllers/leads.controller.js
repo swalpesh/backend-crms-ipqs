@@ -482,6 +482,10 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
       return res.status(400).json({ error: "lead_id and new_lead_stage are required." });
     }
 
+    // ✅ NEW LOGIC: Assign directly to IPQS-H5000 ONLY if it's the Solutions-Team. 
+    // Otherwise, it strictly defaults to '0'.
+    const finalAssignedEmployee = (new_lead_stage === "Solutions-Team") ? "IPQS-H5000" : "0";
+
     // ✅ Fetch existing lead data
     const [leadData] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [lead_id]);
     if (leadData.length === 0) {
@@ -494,11 +498,11 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
     await pool.query(
       `UPDATE leads 
        SET lead_stage = ?, 
-           assigned_employee = '0', 
+           assigned_employee = ?, 
            lead_status = 'new', 
            updated_at = NOW()
        WHERE lead_id = ?`,
-      [new_lead_stage, lead_id]
+      [new_lead_stage, finalAssignedEmployee, lead_id] // <-- Using the new dynamic variable here
     );
 
     // ✅ Log activity in backup table
@@ -512,7 +516,7 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
         oldLead.lead_stage,
         new_lead_stage,
         oldLead.assigned_employee,
-        "0",
+        finalAssignedEmployee, // <-- Using the new dynamic variable here too
         userId,
         departmentId,
         roleId,
@@ -527,7 +531,7 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
       lead_id,
       old_lead_stage: oldLead.lead_stage,
       new_lead_stage,
-      assigned_employee: "0",
+      assigned_employee: finalAssignedEmployee, // <-- Returning the assigned ID in response
       lead_status: "new",
       changed_by: userId,
       department: departmentId,
