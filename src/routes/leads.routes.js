@@ -27,7 +27,9 @@ import {
   getLeadOriginInfo,
   updatePoConfirmedStatus,
   getConfirmedRevenueAnalytics,
-  deleteMultipleLeads
+  deleteMultipleLeads,
+  getFollowUpLeadsForAdmin,
+  getLeadActivityByUser
 } from "../controllers/leads.controller.js";
 
 
@@ -120,6 +122,8 @@ router.patch(
 router.put("/quotation-created", requireAuth, updateQuotationCreatedStatus);
 router.put("/po-status", requireAuth, updatePoConfirmedStatus);
 
+router.get("/admin/follow-up", requireAuth, getFollowUpLeadsForAdmin);
+
 
 router.get(
   "/all",
@@ -139,6 +143,7 @@ router.get("/:id/followup-history", getFollowupHistoryByLead);
 
 router.get("/:lead_id/origin", requireAuth, getLeadOriginInfo);
 
+router.get("/:lead_id/activity/:employee_id", getLeadActivityByUser);
 
 
 

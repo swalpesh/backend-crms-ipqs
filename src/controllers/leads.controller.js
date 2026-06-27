@@ -1655,3 +1655,135 @@ export const deleteMultipleLeads = async (req, res) => {
     connection.release();
   }
 };
+
+/* -------------------------------------------------------------------------- */
+/* ADMIN: GET ALL FOLLOW-UP LEADS                                             */
+/* -------------------------------------------------------------------------- */
+export const getFollowUpLeadsForAdmin = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // 1. Security Check: Restrict to Admin (IpqsHead)
+    if (roleId !== "IpqsHead") {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Admin (IpqsHead) can view all follow-up leads." 
+      });
+    }
+
+    // 2. Fetch all leads where the status is 'follow-up'
+    // (Ordering by updated_at so the most recently interacted leads are at the top)
+    const [leads] = await pool.query(
+      `SELECT * FROM leads 
+       WHERE lead_status = 'follow-up' 
+       ORDER BY updated_at DESC`
+    );
+
+    // 3. Return Success
+    return res.status(200).json({
+      message: "Follow-up leads fetched successfully.",
+      total_leads: leads.length,
+      data: leads
+    });
+
+  } catch (error) {
+    console.error("Error fetching follow-up leads:", error);
+    res.status(500).json({ error: "Server error while fetching follow-up leads." });
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* PUBLIC: GET ALL NOTES & DISCUSSIONS FOR A LEAD BY A SPECIFIC EMPLOYEE      */
+/* -------------------------------------------------------------------------- */
+export const getLeadActivityByUser = async (req, res) => {
+  try {
+    const { lead_id, employee_id } = req.params;
+
+    // 1. Fetch Discussions & Attachments (LEFT JOIN ensures we get discussions even if they have no attachments)
+    const [discussionRows] = await pool.query(
+      `SELECT 
+        d.id, d.message, d.created_by, d.created_at,
+        a.id AS attachment_id, a.file_name, a.file_path
+       FROM lead_discussions d
+       LEFT JOIN lead_discussion_attachments a ON d.id = a.discussion_id
+       WHERE d.lead_id = ? AND d.created_by = ?`,
+      [lead_id, employee_id]
+    );
+
+    // 2. Fetch Notes & Attachments
+    const [noteRows] = await pool.query(
+      `SELECT 
+        n.id, n.title, n.note, n.created_by, n.created_by_department, n.created_by_role, n.created_at,
+        a.id AS attachment_id, a.file_name, a.file_path
+       FROM lead_notes n
+       LEFT JOIN lead_note_attachments a ON n.id = a.note_id
+       WHERE n.lead_id = ? AND n.created_by = ?`,
+      [lead_id, employee_id]
+    );
+
+    // 3. Group the flat SQL rows into structured JSON
+    const discussionsMap = {};
+    for (const row of discussionRows) {
+      if (!discussionsMap[row.id]) {
+        discussionsMap[row.id] = {
+          type: "discussion",
+          id: row.id,
+          message: row.message,
+          created_by: row.created_by,
+          created_at: row.created_at,
+          attachments: []
+        };
+      }
+      if (row.attachment_id) {
+        discussionsMap[row.id].attachments.push({
+          id: row.attachment_id,
+          file_name: row.file_name,
+          file_path: row.file_path
+        });
+      }
+    }
+
+    const notesMap = {};
+    for (const row of noteRows) {
+      if (!notesMap[row.id]) {
+        notesMap[row.id] = {
+          type: "note",
+          id: row.id,
+          title: row.title,
+          note: row.note,
+          created_by: row.created_by,
+          department: row.created_by_department,
+          role: row.created_by_role,
+          created_at: row.created_at,
+          attachments: []
+        };
+      }
+      if (row.attachment_id) {
+        notesMap[row.id].attachments.push({
+          id: row.attachment_id,
+          file_name: row.file_name,
+          file_path: row.file_path
+        });
+      }
+    }
+
+    // 4. Combine both Maps into a single array and sort by Date (Newest first)
+    const timeline = [
+      ...Object.values(discussionsMap),
+      ...Object.values(notesMap)
+    ];
+
+    timeline.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    // 5. Return Success
+    return res.status(200).json({
+      message: `Activity fetched successfully for ${employee_id} on lead ${lead_id}.`,
+      total_records: timeline.length,
+      data: timeline
+    });
+
+  } catch (error) {
+    console.error("Error fetching lead activity:", error);
+    res.status(500).json({ error: "Server error while fetching lead activity." });
+  }
+};

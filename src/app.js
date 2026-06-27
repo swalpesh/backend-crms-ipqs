@@ -36,6 +36,7 @@ import trafoassociateleadRoutes from "./routes/trafoassociateleads.routes.js";
 import ykenterprisesassociateleadRoutes from "./routes/ykenterprisesassociateleads.routes.js";
 import kolhapurassociateleadRoutes from "./routes/kolhapurassociateleads.routes.js";
 import consultationRoutes from "./routes/consultations.routes.js";
+import adminProfileRoutes from "./routes/adminProfiles.routes.js";
 
 
 /* ------------------------------ Config ------------------------------ */
@@ -141,6 +142,7 @@ app.use("/api/oms-callback", omsCallbackRoutes);
 app.use("/api/reimbursements", reimbursementRoutes);
 app.use("/api/notifications", notificationRoutes);
 app.use("/api/consultations", consultationRoutes);
+app.use("/api/adminprofiles", adminProfileRoutes);
 
 /* ----------------------------- Error Handler ----------------------------- */
 app.use((err, _req, res, _next) => {
