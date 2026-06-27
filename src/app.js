@@ -34,6 +34,9 @@ import silverlineassociateleadRoutes from "./routes/silverlineassociateleads.rou
 import trafoassociateleadRoutes from "./routes/trafoassociateleads.routes.js";
 //CHANGED: Imported new Y K Enterprises Associates routes
 import ykenterprisesassociateleadRoutes from "./routes/ykenterprisesassociateleads.routes.js";
+import kolhapurassociateleadRoutes from "./routes/kolhapurassociateleads.routes.js";
+import consultationRoutes from "./routes/consultations.routes.js";
+import adminProfileRoutes from "./routes/adminProfiles.routes.js";
 
 
 /* ------------------------------ Config ------------------------------ */
@@ -130,6 +133,7 @@ app.use("/api/taleads", trafoassociateleadRoutes);
 
 // 📝 CHANGED: Registered new endpoint for Y K Enterprises Associates
 app.use("/api/ykaleads", ykenterprisesassociateleadRoutes);
+app.use("/api/kaleads", kolhapurassociateleadRoutes);
 
 app.use("/api/tleads", TechnicalleadRoutes);
 app.use("/api/sleads", SolutionsleadRoutes);
@@ -137,6 +141,8 @@ app.use("/api/contact", contactRoutes);
 app.use("/api/oms-callback", omsCallbackRoutes);
 app.use("/api/reimbursements", reimbursementRoutes);
 app.use("/api/notifications", notificationRoutes);
+app.use("/api/consultations", consultationRoutes);
+app.use("/api/adminprofiles", adminProfileRoutes);
 
 /* ----------------------------- Error Handler ----------------------------- */
 app.use((err, _req, res, _next) => {

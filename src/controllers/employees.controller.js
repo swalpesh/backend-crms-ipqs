@@ -646,6 +646,243 @@ export const getQuotationTeamEmployees = async (req, res) => {
 };
 
 /* -------------------------------------------------------------------------- */
+/* GET ALL Kolhapur MARKETING EMPLOYEES                                          */
+/* -------------------------------------------------------------------------- */
+export const getKolhapurAssociatesEmployees = async (req, res) => {
+  try {
+    // Note: Adjust 'Field-Marketing' if your exact database string is different 
+    // (e.g., 'Field Marketing' with a space)
+    const targetDepartment = 'Kolhapur-Associates';
+
+    const [employees] = await pool.query(
+      `SELECT 
+        employee_id, 
+        first_name, 
+        last_name, 
+        email, 
+        contact_number, 
+        role_id, 
+        location,
+        in_trip,
+        status 
+       FROM employees 
+       WHERE department_id = ? AND status = 'active'
+       ORDER BY first_name ASC`,
+      [targetDepartment]
+    );
+
+    if (employees.length === 0) {
+      return res.status(200).json({
+        message: "No active employees found in Kolhapur Associates.",
+        total: 0,
+        data: []
+      });
+    }
+
+    return res.status(200).json({
+      message: "Kolhapur Associates employees fetched successfully.",
+      total: employees.length,
+      data: employees
+    });
+
+  } catch (error) {
+    console.error("Error fetching Kolhapur Associates employees:", error);
+    res.status(500).json({ error: "Server error while fetching employees." });
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* GET ALL SILVERLINE ASSOCIATES EMPLOYEES                                          */
+/* -------------------------------------------------------------------------- */
+export const getSilverlineAssociatesEmployees = async (req, res) => {
+  try {
+    // Note: Adjust 'Silverline-Associates' if your exact database string is different 
+    // (e.g., 'Silverline Associates' with a space)
+    const targetDepartment = 'Silverline-Associates';
+
+    const [employees] = await pool.query(
+      `SELECT 
+        employee_id, 
+        first_name, 
+        last_name, 
+        email, 
+        contact_number, 
+        role_id, 
+        location,
+        in_trip,
+        status 
+       FROM employees 
+       WHERE department_id = ? AND status = 'active'
+       ORDER BY first_name ASC`,
+      [targetDepartment]
+    );
+
+    if (employees.length === 0) {
+      return res.status(200).json({
+        message: "No active employees found in Silverline Associates.",
+        total: 0,
+        data: []
+      });
+    }
+
+    return res.status(200).json({
+      message: "Silverline Associates employees fetched successfully.",
+      total: employees.length,
+      data: employees
+    });
+
+  } catch (error) {
+    console.error("Error fetching Field Marketing employees:", error);
+    res.status(500).json({ error: "Server error while fetching employees." });
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* GET ALL Nagpur ASSOCIATES EMPLOYEES                                          */
+/* -------------------------------------------------------------------------- */
+export const getNagpurAssociatesEmployees = async (req, res) => {
+  try {
+    // Note: Adjust 'Nagpur-Associates' if your exact database string is different 
+    // (e.g., 'Nagpur Associates' with a space)
+    const targetDepartment = 'Nagpur-Associates';
+
+    const [employees] = await pool.query(
+      `SELECT 
+        employee_id, 
+        first_name, 
+        last_name, 
+        email, 
+        contact_number, 
+        role_id, 
+        location,
+        in_trip,
+        status 
+       FROM employees 
+       WHERE department_id = ? AND status = 'active'
+       ORDER BY first_name ASC`,
+      [targetDepartment]
+    );
+
+    if (employees.length === 0) {
+      return res.status(200).json({
+        message: "No active employees found in Nagpur Associates.",
+        total: 0,
+        data: []
+      });
+    }
+
+    return res.status(200).json({
+      message: "Nagpur Associates employees fetched successfully.",
+      total: employees.length,
+      data: employees
+    });
+
+  } catch (error) {
+    console.error("Error fetching Field Marketing employees:", error);
+    res.status(500).json({ error: "Server error while fetching employees." });
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* GET ALL TRAFO ASSOCIATES EMPLOYEES                                          */
+/* -------------------------------------------------------------------------- */
+export const getTrafoAssociatesEmployees = async (req, res) => {
+  try {
+    // Note: Adjust 'Trafo-Associates' if your exact database string is different 
+    // (e.g., 'Trafo Associates' with a space)
+    const targetDepartment = 'Trafo-Associates';
+
+    const [employees] = await pool.query(
+      `SELECT 
+        employee_id, 
+        first_name, 
+        last_name, 
+        email, 
+        contact_number, 
+        role_id, 
+        location,
+        in_trip,
+        status 
+       FROM employees 
+       WHERE department_id = ? AND status = 'active'
+       ORDER BY first_name ASC`,
+      [targetDepartment]
+    );
+
+    if (employees.length === 0) {
+      return res.status(200).json({
+        message: "No active employees found in Trafo Associates.",
+        total: 0,
+        data: []
+      });
+    }
+
+    return res.status(200).json({
+      message: "Trafo Associates employees fetched successfully.",
+      total: employees.length,
+      data: employees
+    });
+
+  } catch (error) {
+    console.error("Error fetching Field Marketing employees:", error);
+    res.status(500).json({ error: "Server error while fetching employees." });
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* GET ALL Y-k-Enterprises ASSOCIATES EMPLOYEES                                          */
+/* -------------------------------------------------------------------------- */
+export const getYKEnterprisesAssociatesEmployees = async (req, res) => {
+  try {
+    // Note: Adjust 'Y-k-Enterprises-Associates' if your exact database string is different 
+    // (e.g., 'Y-k Enterprises Associates' with a space)
+    const targetDepartment = 'Y-k-Enterprises-Associates';
+
+    const [employees] = await pool.query(
+      `SELECT 
+        employee_id, 
+        first_name, 
+        last_name, 
+        email, 
+        contact_number, 
+        role_id, 
+        location,
+        in_trip,
+        status 
+       FROM employees 
+       WHERE department_id = ? AND status = 'active'
+       ORDER BY first_name ASC`,
+      [targetDepartment]
+    );
+
+    if (employees.length === 0) {
+      return res.status(200).json({
+        message: "No active employees found in Y-k Enterprises Associates.",
+        total: 0,
+        data: []
+      });
+    }
+
+    return res.status(200).json({
+      message: "Y-k Enterprises Associates employees fetched successfully.",
+      total: employees.length,
+      data: employees
+    });
+
+  } catch (error) {
+    console.error("Error fetching Field Marketing employees:", error);
+    res.status(500).json({ error: "Server error while fetching employees." });
+  }
+};
+
+
+
+
+
+
+
+/* -------------------------------------------------------------------------- */
 /* GET LOGGED-IN EMPLOYEE'S TRIP STATUS                                       */
 /* -------------------------------------------------------------------------- */
 export const getMyTripStatus = async (req, res) => {

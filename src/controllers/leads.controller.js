@@ -23,9 +23,26 @@ function isTeleHead(user) {
 
 /* --------------------- Auto-generate Lead ID (L-001…) ------------------- */
 async function generateLeadId() {
-  const [rows] = await pool.query("SELECT COUNT(*) as count FROM leads");
-  const next = rows[0].count + 1;
-  return `L-${String(next).padStart(3, "0")}`;
+  // Fetch the absolute highest lead_id currently in the database
+  const [lastLeadData] = await pool.query(
+    `SELECT lead_id 
+     FROM leads 
+     WHERE lead_id LIKE 'L-%' 
+     ORDER BY CAST(SUBSTRING(lead_id, 3) AS UNSIGNED) DESC 
+     LIMIT 1`
+  );
+
+  let nextNumber = 1;
+
+  if (lastLeadData.length > 0) {
+    const lastId = lastLeadData[0].lead_id; // e.g., 'L-184'
+    // Extract the number part, parse it to an integer, and add 1
+    const lastNumber = parseInt(lastId.split('-')[1], 10);
+    nextNumber = lastNumber + 1;
+  }
+
+  // Returns L-185 (or pads with zeros for low numbers like L-001)
+  return `L-${String(nextNumber).padStart(3, "0")}`;
 }
 
 /* -------------------------------- Create -------------------------------- */
@@ -465,6 +482,10 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
       return res.status(400).json({ error: "lead_id and new_lead_stage are required." });
     }
 
+    // ✅ NEW LOGIC: Assign directly to IPQS-H5000 ONLY if it's the Solutions-Team. 
+    // Otherwise, it strictly defaults to '0'.
+    const finalAssignedEmployee = (new_lead_stage === "Solutions-Team") ? "IPQS-H5000" : "0";
+
     // ✅ Fetch existing lead data
     const [leadData] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [lead_id]);
     if (leadData.length === 0) {
@@ -477,11 +498,11 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
     await pool.query(
       `UPDATE leads 
        SET lead_stage = ?, 
-           assigned_employee = '0', 
+           assigned_employee = ?, 
            lead_status = 'new', 
            updated_at = NOW()
        WHERE lead_id = ?`,
-      [new_lead_stage, lead_id]
+      [new_lead_stage, finalAssignedEmployee, lead_id] // <-- Using the new dynamic variable here
     );
 
     // ✅ Log activity in backup table
@@ -495,7 +516,7 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
         oldLead.lead_stage,
         new_lead_stage,
         oldLead.assigned_employee,
-        "0",
+        finalAssignedEmployee, // <-- Using the new dynamic variable here too
         userId,
         departmentId,
         roleId,
@@ -510,7 +531,7 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
       lead_id,
       old_lead_stage: oldLead.lead_stage,
       new_lead_stage,
-      assigned_employee: "0",
+      assigned_employee: finalAssignedEmployee, // <-- Returning the assigned ID in response
       lead_status: "new",
       changed_by: userId,
       department: departmentId,
@@ -1566,5 +1587,203 @@ export const getConfirmedRevenueAnalytics = async (req, res) => {
   } catch (error) {
     console.error("Error fetching revenue analytics:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* DELETE MULTIPLE LEADS (Admin Only - Deletes from ALL related tables)       */
+/* -------------------------------------------------------------------------- */
+export const deleteMultipleLeads = async (req, res) => {
+  // We MUST use a single connection for transactions, not the generic pool
+  const connection = await pool.getConnection(); 
+
+  try {
+    const { lead_ids } = req.body;
+    const roleId = req.user.role_id;
+
+    // 1. Security Check: Restrict to Admin (IpqsHead)
+    if (roleId !== "IpqsHead") {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Admin (IpqsHead) can delete leads." 
+      });
+    }
+
+    // 2. Validation
+    if (!lead_ids || !Array.isArray(lead_ids) || lead_ids.length === 0) {
+      return res.status(400).json({ 
+        error: "Please provide an array of lead_ids to delete." 
+      });
+    }
+
+    // 3. Start the Transaction
+    await connection.beginTransaction();
+
+    // 4. Delete from all Child Tables First!
+    // (Order is important to prevent Foreign Key constraint errors)
+    
+    // -> Activity Backup
+    await connection.query(`DELETE FROM lead_activity_backup WHERE lead_id IN (?)`, [lead_ids]);
+    
+    // -> Main Lead Attachments
+    await connection.query(`DELETE FROM lead_attachments WHERE lead_id IN (?)`, [lead_ids]);
+
+    // -> Discussions
+    await connection.query(`DELETE FROM lead_discussions WHERE lead_id IN (?)`, [lead_ids]);
+
+    // -> Notes
+    await connection.query(`DELETE FROM lead_notes WHERE lead_id IN (?)`, [lead_ids]);
+
+    // 5. Finally, Delete the Actual Parent Leads
+    const [result] = await connection.query(`DELETE FROM leads WHERE lead_id IN (?)`, [lead_ids]);
+
+    // 6. If everything succeeded, COMMIT the transaction to permanently save changes
+    await connection.commit();
+
+    return res.status(200).json({
+      message: `Successfully deleted ${result.affectedRows} leads and wiped all associated data from 7 tables.`,
+      deleted_leads: lead_ids
+    });
+
+  } catch (error) {
+    // 💥 If ANYTHING fails, undo all the deletions instantly!
+    await connection.rollback();
+    console.error("Error during bulk delete:", error);
+    res.status(500).json({ error: "Server error while deleting leads." });
+  } finally {
+    // Always release the connection back to the pool so your server doesn't crash
+    connection.release();
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* ADMIN: GET ALL FOLLOW-UP LEADS                                             */
+/* -------------------------------------------------------------------------- */
+export const getFollowUpLeadsForAdmin = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // 1. Security Check: Restrict to Admin (IpqsHead)
+    if (roleId !== "IpqsHead") {
+      return res.status(403).json({ 
+        error: "Forbidden: Only the Admin (IpqsHead) can view all follow-up leads." 
+      });
+    }
+
+    // 2. Fetch all leads where the status is 'follow-up'
+    // (Ordering by updated_at so the most recently interacted leads are at the top)
+    const [leads] = await pool.query(
+      `SELECT * FROM leads 
+       WHERE lead_status = 'follow-up' 
+       ORDER BY updated_at DESC`
+    );
+
+    // 3. Return Success
+    return res.status(200).json({
+      message: "Follow-up leads fetched successfully.",
+      total_leads: leads.length,
+      data: leads
+    });
+
+  } catch (error) {
+    console.error("Error fetching follow-up leads:", error);
+    res.status(500).json({ error: "Server error while fetching follow-up leads." });
+  }
+};
+
+
+/* -------------------------------------------------------------------------- */
+/* PUBLIC: GET ALL NOTES & DISCUSSIONS FOR A LEAD BY A SPECIFIC EMPLOYEE      */
+/* -------------------------------------------------------------------------- */
+export const getLeadActivityByUser = async (req, res) => {
+  try {
+    const { lead_id, employee_id } = req.params;
+
+    // 1. Fetch Discussions & Attachments (LEFT JOIN ensures we get discussions even if they have no attachments)
+    const [discussionRows] = await pool.query(
+      `SELECT 
+        d.id, d.message, d.created_by, d.created_at,
+        a.id AS attachment_id, a.file_name, a.file_path
+       FROM lead_discussions d
+       LEFT JOIN lead_discussion_attachments a ON d.id = a.discussion_id
+       WHERE d.lead_id = ? AND d.created_by = ?`,
+      [lead_id, employee_id]
+    );
+
+    // 2. Fetch Notes & Attachments
+    const [noteRows] = await pool.query(
+      `SELECT 
+        n.id, n.title, n.note, n.created_by, n.created_by_department, n.created_by_role, n.created_at,
+        a.id AS attachment_id, a.file_name, a.file_path
+       FROM lead_notes n
+       LEFT JOIN lead_note_attachments a ON n.id = a.note_id
+       WHERE n.lead_id = ? AND n.created_by = ?`,
+      [lead_id, employee_id]
+    );
+
+    // 3. Group the flat SQL rows into structured JSON
+    const discussionsMap = {};
+    for (const row of discussionRows) {
+      if (!discussionsMap[row.id]) {
+        discussionsMap[row.id] = {
+          type: "discussion",
+          id: row.id,
+          message: row.message,
+          created_by: row.created_by,
+          created_at: row.created_at,
+          attachments: []
+        };
+      }
+      if (row.attachment_id) {
+        discussionsMap[row.id].attachments.push({
+          id: row.attachment_id,
+          file_name: row.file_name,
+          file_path: row.file_path
+        });
+      }
+    }
+
+    const notesMap = {};
+    for (const row of noteRows) {
+      if (!notesMap[row.id]) {
+        notesMap[row.id] = {
+          type: "note",
+          id: row.id,
+          title: row.title,
+          note: row.note,
+          created_by: row.created_by,
+          department: row.created_by_department,
+          role: row.created_by_role,
+          created_at: row.created_at,
+          attachments: []
+        };
+      }
+      if (row.attachment_id) {
+        notesMap[row.id].attachments.push({
+          id: row.attachment_id,
+          file_name: row.file_name,
+          file_path: row.file_path
+        });
+      }
+    }
+
+    // 4. Combine both Maps into a single array and sort by Date (Newest first)
+    const timeline = [
+      ...Object.values(discussionsMap),
+      ...Object.values(notesMap)
+    ];
+
+    timeline.sort((a, b) => new Date(b.created_at) - new Date(a.created_at));
+
+    // 5. Return Success
+    return res.status(200).json({
+      message: `Activity fetched successfully for ${employee_id} on lead ${lead_id}.`,
+      total_records: timeline.length,
+      data: timeline
+    });
+
+  } catch (error) {
+    console.error("Error fetching lead activity:", error);
+    res.status(500).json({ error: "Server error while fetching lead activity." });
   }
 };

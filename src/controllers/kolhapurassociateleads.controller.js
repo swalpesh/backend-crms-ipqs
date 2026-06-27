@@ -3,11 +3,30 @@ import { validationResult } from "express-validator";
 
 /* ----------------------------- Role Helpers ----------------------------- */
 function isIpqsHead(user) {
-  return user?.department_id === "IpqsHead" && user?.role_id === "IpqsHead";
+  return (
+    user?.department_id === "IpqsHead" &&
+    user?.role_id === "IpqsHead"
+  );
 }
 
-function isFieldHead(user) {
-  return user?.department_id === "Field-Marketing" && user?.role_id === "Field-Marketing-Head";
+// 📝 CHANGED: Function name updated to isKolhapurAssociateHead
+function isKolhapurAssociateHead(user) {
+  return (
+    // 📝 CHANGED: department_id check updated to 'Kolhapur-Associates'
+    user?.department_id === "Kolhapur-Associates" &&
+    // 📝 CHANGED: role_id check updated to 'Kolhapur-Associates-Head'
+    user?.role_id === "Kolhapur-Associates-Head"
+  );
+}
+
+// 📝 CHANGED: Function name updated to isKolhapurAssociateEmployee
+function isKolhapurAssociateEmployee(user) {
+  return (
+    // 📝 CHANGED: department_id check updated to 'Kolhapur-Associates'
+    user?.department_id === "Kolhapur-Associates" &&
+    // 📝 CHANGED: role_id check updated to 'Kolhapur-Associates-Employee'
+    user?.role_id === "Kolhapur-Associates-Employee"
+  );
 }
 
 /* --------------------- Auto-generate Lead ID (L-001…) ------------------- */
@@ -116,7 +135,7 @@ export const createLead = async (req, res) => {
         industry_type,
         lead_requirement,
         notes,
-        assigned_employee || "0", // Default to "0" (Unassigned) if empty
+        assigned_employee || "0", 
         created_by,
         lead_status || "new",
         
@@ -125,15 +144,15 @@ export const createLead = async (req, res) => {
         lead_status === "follow-up" ? follow_up_date : null,
         lead_status === "follow-up" ? follow_up_time : null,
         
-        lead_stage || "Field-Marketing",
+        // 📝 CHANGED: Default lead_stage mapped to "Kolhapur-Associates"
+        lead_stage || "Kolhapur-Associates",
 
-        // ✅ New Fields Data
         lead_type || null,
-        lead_priority || "Medium", // Default to Medium if not provided
+        lead_priority || "Medium", 
         expected_closing_date || null,
         expected_revenue || 0.00,
         probability || 0,
-        mark_as_hot_lead ? 1 : 0 // Ensure Boolean is stored as 1 or 0
+        mark_as_hot_lead ? 1 : 0 
       ]
     );
 
@@ -142,7 +161,8 @@ export const createLead = async (req, res) => {
       `INSERT INTO lead_activity_backup 
       (lead_id, new_lead_stage, new_assigned_employee, reason, change_timestamp)
       VALUES (?, ?, ?, 'New Lead Created', CURRENT_TIMESTAMP)`,
-      [lead_id, lead_stage || "Field-Marketing", assigned_employee || "0"]
+      // 📝 CHANGED: Backup log default mapped to "Kolhapur-Associates"
+      [lead_id, lead_stage || "Kolhapur-Associates", assigned_employee || "0"]
     );
 
     // ✅ 3. Handle attachments (optional)
@@ -167,12 +187,10 @@ export const createLead = async (req, res) => {
   }
 };
 
-
 /* --------------------------------- List --------------------------------- */
 export const listLeads = async (req, res) => {
   try {
     const { lead_status, lead_stage, assigned_employee } = req.query;
-
     let query = "SELECT * FROM leads WHERE 1=1";
     const params = [];
 
@@ -199,7 +217,11 @@ export const listLeads = async (req, res) => {
       lead.attachments = attachments;
     }
 
-    return res.status(200).json({ message: "Leads fetched successfully", leads });
+    return res.status(200).json({
+      message: "Leads fetched successfully",
+      total: leads.length,
+      leads,
+    });
   } catch (error) {
     console.error("Error fetching leads:", error);
     res.status(500).json({ error: "Server error" });
@@ -209,18 +231,13 @@ export const listLeads = async (req, res) => {
 /* ---------------------------- Update status ----------------------------- */
 export const updateLeadStatus = async (req, res) => {
   try {
-    const { id } = req.params; // lead_id
+    const { id } = req.params; 
     const { lead_status, follow_up_reason, follow_up_date, follow_up_time } = req.body;
 
-    console.log("🚀 updateLeadStatus called for Lead:", id);
-    console.log("📦 Request Body:", req.body);
-
     if (!["follow-up", "lost"].includes(lead_status)) {
-      console.log("❌ Invalid status");
       return res.status(400).json({ error: "Invalid status. Only follow-up or lost allowed." });
     }
 
-    // ✅ Fetch existing data (correct columns)
     const [prevRows] = await pool.query(
       `SELECT follow_up_reason, follow_up_date, follow_up_time, 
               assigned_employee, lead_stage
@@ -229,13 +246,10 @@ export const updateLeadStatus = async (req, res) => {
     );
 
     if (prevRows.length === 0) {
-      console.log("❌ Lead not found");
       return res.status(404).json({ error: "Lead not found" });
     }
 
     const previousData = prevRows[0];
-    console.log("🗂 Previous Lead Data:", previousData);
-
     let params;
 
     if (lead_status === "follow-up") {
@@ -252,14 +266,12 @@ export const updateLeadStatus = async (req, res) => {
         previousData.follow_up_date || null,
         previousData.follow_up_time || null,
         previousData.follow_up_reason || null,
-        previousData.assigned_employee || null, // ✅ correct column
+        previousData.assigned_employee || null,
         follow_up_date,
         follow_up_time,
         follow_up_reason,
-        previousData.lead_stage || null, // ✅ correct column
+        previousData.lead_stage || null, 
       ];
-
-      console.log("🟢 Inserting followup_history with:", backupData);
 
       try {
         const [insertResult] = await pool.query(
@@ -269,24 +281,19 @@ export const updateLeadStatus = async (req, res) => {
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NOW())`,
           backupData
         );
-        console.log("✅ Insert success:", insertResult);
       } catch (err) {
         console.error("❌ INSERT ERROR:", err);
       }
     } else {
-      // lost case
       params = [lead_status, null, null, null, id];
-      console.log("⚪ Lead marked as lost, skipping history insert.");
     }
 
-    // ✅ Update leads table
-    const [updateResult] = await pool.query(
+    await pool.query(
       `UPDATE leads 
        SET lead_status = ?, follow_up_reason = ?, follow_up_date = ?, follow_up_time = ?, updated_at = NOW()
        WHERE lead_id = ?`,
       params
     );
-    console.log("🟢 Update success:", updateResult);
 
     return res.status(200).json({ message: `Lead ${id} updated to ${lead_status}` });
   } catch (error) {
@@ -295,16 +302,11 @@ export const updateLeadStatus = async (req, res) => {
   }
 };
 
-
-/* ------------------------- My Field leads (self) ------------------------- */
-/* ---------------- List Leads by Employee (With Names & Counts) ---------------- */
 export const listLeadsByEmployee = async (req, res) => {
   try {
     const employeeId = req.user.employee_id;
     const { lead_status } = req.query;
 
-    // ✅ Base Query: Select Lead + Join Employee Table twice (for Assigned & Creator)
-    // We use aliases 'assignee' and 'creator' to distinguish between the two joins.
     let query = `
       SELECT 
         l.*,
@@ -318,12 +320,12 @@ export const listLeadsByEmployee = async (req, res) => {
       LEFT JOIN employees creator 
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
       WHERE l.assigned_employee = ? 
-      AND l.lead_stage = 'Field-Marketing'
+      -- 📝 CHANGED: Filter by 'Kolhapur-Associates' stage
+      AND l.lead_stage = 'Kolhapur-Associates'
     `;
 
     const params = [employeeId];
 
-    // ✅ Filter by Lead Status (if provided)
     if (lead_status) {
       if (!["new", "follow-up", "lost", "progress", "completed"].includes(lead_status)) {
         return res.status(400).json({ error: "Invalid lead_status value" });
@@ -332,38 +334,29 @@ export const listLeadsByEmployee = async (req, res) => {
       params.push(lead_status);
     }
 
-    // ✅ Order by newest first
     query += " ORDER BY l.created_at DESC";
 
     const [leads] = await pool.query(query, params);
-
-    // ✅ Calculate Counts
     let hotLeadsCount = 0;
 
-    // ✅ Process Leads (Add Attachments & Count Hot Leads)
     for (const lead of leads) {
-      // Count if it's a hot lead (ensure boolean check works for 1/0/true/false)
       if (lead.mark_as_hot_lead === 1 || lead.mark_as_hot_lead === true) {
         hotLeadsCount++;
       }
 
-      // Fetch Attachments
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
       );
       lead.attachments = attachments;
 
-      // Fallback: If name is null (e.g., deleted employee), use username or "Unknown"
       if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
       if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
       
-      // Remove raw username fields to keep JSON clean (optional)
       delete lead.assigned_employee_username;
       delete lead.created_by_username;
     }
 
-    // ✅ Return Response
     return res.status(200).json({
       message: "Leads fetched successfully",
       employee_id: employeeId,
@@ -371,7 +364,6 @@ export const listLeadsByEmployee = async (req, res) => {
       hot_leads_count: hotLeadsCount,
       leads,
     });
-
   } catch (error) {
     console.error("Error fetching employee leads:", error);
     res.status(500).json({ error: "Server error" });
@@ -381,20 +373,19 @@ export const listLeadsByEmployee = async (req, res) => {
 /* ------------------------ Today’s follow-ups (self) --------------------- */
 export const listTodaysFollowUps = async (req, res) => {
   try {
-    const employeeId = req.user.employee_id; // from JWT
+    const employeeId = req.user.employee_id;
 
-    // ✅ Fetch today's follow-ups for leads either created by OR assigned to this employee
     const [leads] = await pool.query(
       `SELECT * FROM leads 
        WHERE (created_by = ? OR assigned_employee = ?)
        AND lead_status = 'follow-up' 
-       AND lead_stage = 'Field-Marketing'
+       -- 📝 CHANGED: Filter by 'Kolhapur-Associates' stage
+       AND lead_stage = 'Kolhapur-Associates'
        AND follow_up_date = CURDATE()
        ORDER BY follow_up_time ASC`,
       [employeeId, employeeId]
     );
 
-    // ✅ Attach uploaded documents for each lead
     for (const lead of leads) {
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
@@ -403,7 +394,7 @@ export const listTodaysFollowUps = async (req, res) => {
       lead.attachments = attachments;
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       message: "Today's follow-ups fetched successfully",
       employee: employeeId,
       date: new Date().toISOString().split("T")[0],
@@ -416,25 +407,20 @@ export const listTodaysFollowUps = async (req, res) => {
   }
 };
 
-
-/* -------- Field-Marketing employees & their leads (Head or IpqsHead) ----- */
-export const fieldMarketingAllLeads = async (req, res) => {
+// 📝 CHANGED: Function name changed to KolhapurAssociatesAllLeads
+export const KolhapurAssociatesAllLeads = async (req, res) => {
   try {
-    if (!(isFieldHead(req.user) || isIpqsHead(req.user))) {
-      return res.status(403).json({
-        error: "Forbidden: Only Field-Marketing Head or IpqsHead can access this.",
-      });
-    }
-
     const [employees] = await pool.query(
-      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Field-Marketing'"
+      // 📝 CHANGED: Query updated to fetch 'Kolhapur-Associates' employees
+      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Kolhapur-Associates'"
     );
 
     const data = { employees: [], unassigned_leads: [] };
 
     for (const emp of employees) {
       const [leads] = await pool.query(
-        "SELECT * FROM leads WHERE assigned_employee = ? AND lead_stage = 'Field-Marketing'",
+        // 📝 CHANGED: Query updated to fetch 'Kolhapur-Associates' leads for employee
+        "SELECT * FROM leads WHERE assigned_employee = ? AND lead_stage = 'Kolhapur-Associates'",
         [emp.employee_id]
       );
 
@@ -450,7 +436,8 @@ export const fieldMarketingAllLeads = async (req, res) => {
     }
 
     const [unassigned] = await pool.query(
-      "SELECT * FROM leads WHERE assigned_employee = '0' AND lead_stage = 'Field-Marketing'"
+      // 📝 CHANGED: Query updated to fetch unassigned 'Kolhapur-Associates' leads
+      "SELECT * FROM leads WHERE assigned_employee = '0' AND lead_stage = 'Kolhapur-Associates'"
     );
 
     for (const lead of unassigned) {
@@ -464,14 +451,15 @@ export const fieldMarketingAllLeads = async (req, res) => {
     data.unassigned_leads = unassigned;
 
     res.status(200).json({
-      message: "Field-Marketing employees and their leads fetched successfully",
-      department: "Field-Marketing",
+      // 📝 CHANGED: Response message and department tag updated to 'Kolhapur-Associates'
+      message: "Kolhapur Associates employees and their leads fetched successfully",
+      department: "Kolhapur-Associates",
       total_employees: data.employees.length,
       total_unassigned_leads: data.unassigned_leads.length,
       ...data,
     });
   } catch (error) {
-    console.error("Error fetching Field-Marketing leads:", error);
+    console.error("Error fetching Kolhapur Associates leads:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
@@ -484,32 +472,38 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
     const departmentId = req.user.department_id;
     const roleId = req.user.role_id;
 
-    const allowedRoles = ["IpqsHead", "Field-Marketing-Head", "Field-Marketing-Employee"];
+    // 📝 CHANGED: Allowed roles updated for Kolhapur Associates
+    const allowedRoles = [
+      "IpqsHead",
+      "Kolhapur-Associates-Head",
+      "Kolhapur-Associates-Employee",
+    ];
 
     if (!allowedRoles.includes(roleId)) {
-      return res
-        .status(403)
-        .json({ error: "Forbidden: You are not allowed to change lead stage." });
+      return res.status(403).json({
+        error: "Forbidden: You are not allowed to change lead stage.",
+      });
     }
 
     if (!lead_id || !new_lead_stage) {
-      return res.status(400).json({ error: "lead_id and new_lead_stage are required." });
+      return res
+        .status(400)
+        .json({ error: "lead_id and new_lead_stage are required." });
     }
 
-    const [leadData] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [lead_id]);
-    if (leadData.length === 0) {
+    const [leadData] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [
+      lead_id,
+    ]);
+    if (leadData.length === 0)
       return res.status(404).json({ error: "Lead not found." });
-    }
 
     const oldLead = leadData[0];
 
-    // ✅ DYNAMIC ASSIGNMENT LOGIC
-    let newAssignedEmployee = '0'; // Default to unassigned for most departments
+    let newAssignedEmployee = '0'; 
     if (new_lead_stage === 'Solutions-Team') {
-        newAssignedEmployee = 'IPQS-H5000'; // Force assign to Solutions Head
+        newAssignedEmployee = 'IPQS-H5000'; 
     }
 
-    // ✅ UPDATE QUERY: Removed hardcoded '0', replaced with newAssignedEmployee
     await pool.query(
       `UPDATE leads 
        SET lead_stage = ?, assigned_employee = ?, lead_status = 'new', updated_at = NOW()
@@ -517,7 +511,6 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
       [new_lead_stage, newAssignedEmployee, lead_id]
     );
 
-    // ✅ BACKUP QUERY: Ensure backup logs the correct new assigned employee
     await pool.query(
       `INSERT INTO lead_activity_backup 
        (lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
@@ -528,7 +521,7 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
         oldLead.lead_stage,
         new_lead_stage,
         oldLead.assigned_employee,
-        newAssignedEmployee, // <-- Replaced hardcoded "0"
+        newAssignedEmployee, 
         userId,
         departmentId,
         roleId,
@@ -537,12 +530,12 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
       ]
     );
 
-    return res.status(200).json({
+    res.status(200).json({
       message: `Lead ${lead_id} moved to ${new_lead_stage} successfully.`,
       lead_id,
       old_lead_stage: oldLead.lead_stage,
       new_lead_stage,
-      assigned_employee: newAssignedEmployee, // <-- Updated Response
+      assigned_employee: newAssignedEmployee, 
       lead_status: "new",
       reason: reason || "Not provided",
     });
@@ -552,30 +545,31 @@ export const changeLeadStageByIpqsHead = async (req, res) => {
   }
 };
 
-/* -------------------------- Assign lead to Lead (Head & Employee both) -------------------------- */
-export const assignLeadToFieldEmployee = async (req, res) => {
+/* -------------------------- Assign lead to Employee -------------------------- */
+// 📝 CHANGED: Function name updated to assignLeadToKolhapurAssociateEmployee
+export const assignLeadToKolhapurAssociateEmployee = async (req, res) => {
   try {
+    // 📝 CHANGED: Destructured request body variables renamed for kolhapur_associate
     const {
       lead_id,
       assigned_employee,
-      field_visit_date,
-      field_visit_time,
-      field_visit_priority,
-      field_visit_type,
+      kolhapur_associate_visit_date,
+      kolhapur_associate_visit_time,
+      kolhapur_associate_visit_priority,
+      kolhapur_associate_visit_type,
       reason,
     } = req.body;
 
     const headId = req.user.employee_id;
-    const department = "Field-Marketing";
+    // 📝 CHANGED: Department variable set to 'Kolhapur-Associates'
+    const department = "Kolhapur-Associates";
 
-    // ✅ Validation
     if (!lead_id || !assigned_employee) {
       return res.status(400).json({
         error: "lead_id and assigned_employee are required.",
       });
     }
 
-    // ✅ Check if Lead Exists
     const [existing] = await pool.query(
       "SELECT * FROM leads WHERE lead_id = ?",
       [lead_id]
@@ -587,33 +581,34 @@ export const assignLeadToFieldEmployee = async (req, res) => {
 
     const oldLead = existing[0];
 
-    // ✅ Update Lead with Field Marketing Details
+    // 📝 CHANGED: UPDATE query columns changed to kolhapur_associate_*
     await pool.query(
       `
       UPDATE leads
       SET 
         assigned_employee = ?,
         lead_stage = ?,
-        field_visit_date = ?,
-        field_visit_time = ?,
-        field_visit_priority = ?,
-        field_visit_type = ?,
-        field_visit_status = 'Pending',
+        kolhapur_associate_visit_date = ?,
+        kolhapur_associate_visit_time = ?,
+        kolhapur_associate_visit_priority = ?,
+        kolhapur_associate_visit_type = ?,
+        kolhapur_associate_visit_status = 'Pending',
         updated_at = NOW()
       WHERE lead_id = ?
       `,
       [
         assigned_employee,
-        department, // Sets stage to 'Field-Marketing'
-        field_visit_date || null,
-        field_visit_time || null,
-        field_visit_priority || "Medium",
-        field_visit_type || "Specific",
+        department, 
+        // 📝 CHANGED: Mapping body variables to query params
+        kolhapur_associate_visit_date || null,
+        kolhapur_associate_visit_time || null,
+        kolhapur_associate_visit_priority || "Medium",
+        kolhapur_associate_visit_type || "Specific",
         lead_id,
       ]
     );
 
-    // ✅ Log Activity in Backup Table
+    // ✅ Log Activity
     await pool.query(
       `
       INSERT INTO lead_activity_backup
@@ -640,51 +635,54 @@ export const assignLeadToFieldEmployee = async (req, res) => {
         headId,
         req.user.department_id,
         req.user.role_id,
-        "field_visit_scheduled", // Specific change type
-        reason || "Field Marketing visit scheduled",
+        // 📝 CHANGED: change_type string updated
+        "kolhapur_associate_visit_scheduled", 
+        // 📝 CHANGED: reason string updated
+        reason || "Kolhapur Associates visit scheduled",
       ]
     );
 
     res.status(200).json({
-      message: "Field Marketing visit scheduled successfully",
+      // 📝 CHANGED: Response message and payload keys updated
+      message: "Kolhapur Associates visit scheduled successfully",
       lead_id,
       assigned_employee,
-      field_visit_date,
-      field_visit_time,
-      field_visit_priority,
-      field_visit_type,
+      kolhapur_associate_visit_date,
+      kolhapur_associate_visit_time,
+      kolhapur_associate_visit_priority,
+      kolhapur_associate_visit_type,
     });
   } catch (error) {
-    console.error("Error scheduling field visit:", error);
+    console.error("Error scheduling visit:", error);
     res.status(500).json({
-      error: "Server error while scheduling field visit",
+      error: "Server error while scheduling visit",
     });
   }
 };
 
-/* ------------------ Get Field Visit Details (Head & Team) ------------------ */
-export const getFieldMarketingVisitDetails = async (req, res) => {
+/* ------------------ Get Visit Details (Head & Team) ------------------ */
+// 📝 CHANGED: Function name updated to getKolhapurAssociatesVisitDetails
+export const getKolhapurAssociatesVisitDetails = async (req, res) => {
   try {
     const headId = req.user.employee_id;
     const roleId = req.user.role_id;
 
-    // ✅ Strict check: Only Field-Marketing-Head allowed
-    if (roleId !== "Field-Marketing-Head") {
+    // 📝 CHANGED: Role check updated to 'Kolhapur-Associates-Head'
+    if (roleId !== "Kolhapur-Associates-Head") {
       return res.status(403).json({
-        error: "Forbidden: Only Field-Marketing Head can access visit details.",
+        error: "Forbidden: Only Kolhapur Associates Head can access visit details.",
       });
     }
 
-    // ✅ Query: Select Field Marketing specific columns
-    // Included COLLATE fix for the JOIN to prevent error 1267
+    // 📝 CHANGED: Query updated to select kolhapur_associate_* columns and filter by stage
     const query = `
       SELECT 
         l.lead_id,
         l.company_name, 
         l.lead_name, 
-        l.field_visit_date, 
-        l.field_visit_time, 
-        l.field_visit_priority, 
+        l.kolhapur_associate_visit_date, 
+        l.kolhapur_associate_visit_time, 
+        l.kolhapur_associate_visit_priority, 
         l.assigned_employee,
         e.first_name,
         e.last_name,
@@ -692,18 +690,16 @@ export const getFieldMarketingVisitDetails = async (req, res) => {
       FROM leads l
       LEFT JOIN employees e 
         ON l.assigned_employee COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.lead_stage = 'Field-Marketing'
-      ORDER BY l.field_visit_date DESC, l.field_visit_time ASC
+      WHERE l.lead_stage = 'Kolhapur-Associates'
+      ORDER BY l.kolhapur_associate_visit_date DESC, l.kolhapur_associate_visit_time ASC
     `;
 
     const [rows] = await pool.query(query);
 
-    // ✅ Data Segmentation: Split into Head's data and Team's data
     const headVisits = [];
     const teamVisits = [];
 
     for (const row of rows) {
-      // Create a full name string, or fall back to username/Unassigned
       let assignedPersonName = "Unassigned";
       
       if (row.first_name && row.last_name) {
@@ -712,20 +708,19 @@ export const getFieldMarketingVisitDetails = async (req, res) => {
         assignedPersonName = row.username;
       }
 
-      // Map database columns to clean JSON keys
+      // 📝 CHANGED: Mapping kolhapur database columns to JSON object
       const visitData = {
         lead_id: row.lead_id,
         company_name: row.company_name,
         lead_name: row.lead_name,
-        visit_date: row.field_visit_date,
-        visit_time: row.field_visit_time,
-        visit_priority: row.field_visit_priority,
+        visit_date: row.kolhapur_associate_visit_date,
+        visit_time: row.kolhapur_associate_visit_time,
+        visit_priority: row.kolhapur_associate_visit_priority,
         assigned_person: assignedPersonName,
         assigned_person_username: row.username || null,
-        assigned_employee_id: row.assigned_employee // Helpful for frontend logic
+        assigned_employee_id: row.assigned_employee
       };
 
-      // Check if the assigned employee ID matches the Head's ID
       if (row.assigned_employee === headId) {
         headVisits.push(visitData);
       } else {
@@ -733,9 +728,9 @@ export const getFieldMarketingVisitDetails = async (req, res) => {
       }
     }
 
-    // ✅ Return response
     return res.status(200).json({
-      message: "Field Marketing visit details fetched successfully",
+      // 📝 CHANGED: Response message updated
+      message: "Kolhapur Associates visit details fetched successfully",
       total_records: rows.length,
       head_data: {
         count: headVisits.length,
@@ -748,22 +743,18 @@ export const getFieldMarketingVisitDetails = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error fetching field visit details:", error);
+    console.error("Error fetching visit details:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
 
-
-
-
-
-/* ---------------- Get Unscheduled Field Marketing Leads assigned to particular employee (myactivity)---------------- */
-export const getUnscheduledFieldLeads = async (req, res) => {
+/* ---------------- Get Unscheduled Leads ---------------- */
+// 📝 CHANGED: Function name updated to getUnscheduledKolhapurAssociateLeads
+export const getUnscheduledKolhapurAssociateLeads = async (req, res) => {
   try {
     const employeeId = req.user.employee_id;
 
-    // ✅ Query: Find leads in Field-Marketing with NULL visit date/time 
-    // AND assigned to (or created by) the logged-in employee
+    // 📝 CHANGED: Query updated to check kolhapur_associate_* columns and stage
     const query = `
       SELECT 
         l.*,
@@ -776,59 +767,55 @@ export const getUnscheduledFieldLeads = async (req, res) => {
         ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN employees creator 
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.lead_stage = 'Field-Marketing'
-        AND l.field_visit_date IS NULL
-        AND l.field_visit_time IS NULL
+      WHERE l.lead_stage = 'Kolhapur-Associates'
+        AND l.kolhapur_associate_visit_date IS NULL
+        AND l.kolhapur_associate_visit_time IS NULL
         AND l.assigned_employee = ?
       ORDER BY l.created_at DESC
     `;
 
-    // Execute query
     const [leads] = await pool.query(query, [employeeId]);
 
-    // ✅ Process Leads (Add Attachments & Clean up names)
     for (const lead of leads) {
-      // Fetch Attachments
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
       );
       lead.attachments = attachments;
 
-      // Clean up names (Fallback to username or "Unknown")
       if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
       if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
       
-      // Remove raw username fields to keep JSON clean
       delete lead.assigned_employee_username;
       delete lead.created_by_username;
     }
 
-    // ✅ Return Response
     return res.status(200).json({
-      message: "Unscheduled Field Marketing leads fetched successfully",
+      // 📝 CHANGED: Response message updated
+      message: "Unscheduled Kolhapur Associates leads fetched successfully",
       employee_id: employeeId,
       total_unscheduled_leads: leads.length,
       leads,
     });
 
   } catch (error) {
-    console.error("Error fetching unscheduled field leads:", error);
+    console.error("Error fetching unscheduled leads:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
 
-/* ---------------- Get Scheduled Field Visits (Filtered by Date) (myactivity)---------------- */
-export const getScheduledFieldVisits = async (req, res) => {
+/* ---------------- Get Scheduled Visits ---------------- */
+// 📝 CHANGED: Function name updated to getScheduledKolhapurAssociateVisits
+export const getScheduledKolhapurAssociateVisits = async (req, res) => {
   try {
     const employeeId = req.user.employee_id;
-    const { date } = req.query; // Expecting format: YYYY-MM-DD
+    const { date } = req.query; 
 
-    // Base Query: return all columns, but override field_visit_date as plain string
+    // 📝 CHANGED: Query updated for kolhapur_associate_visit_date format and stage
     let query = `
       SELECT 
         l.*,
-        DATE_FORMAT(l.field_visit_date, '%Y-%m-%d') AS field_visit_date,
+        DATE_FORMAT(l.kolhapur_associate_visit_date, '%Y-%m-%d') AS kolhapur_associate_visit_date,
         CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
         assignee.username AS assigned_employee_username,
         CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
@@ -838,14 +825,13 @@ export const getScheduledFieldVisits = async (req, res) => {
         ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN employees creator 
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.lead_stage = 'Field-Marketing'
+      WHERE l.lead_stage = 'Kolhapur-Associates'
         AND l.assigned_employee = ?
-        AND l.field_visit_date IS NOT NULL
+        AND l.kolhapur_associate_visit_date IS NOT NULL
     `;
 
     const params = [employeeId];
 
-    // Dynamic Date Filter
     if (date) {
       const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
       if (!dateRegex.test(date)) {
@@ -853,18 +839,17 @@ export const getScheduledFieldVisits = async (req, res) => {
           error: "Invalid date format. Please use YYYY-MM-DD.",
         });
       }
-
-      query += ` AND l.field_visit_date = ?`;
+      
+      // 📝 CHANGED: Query updated to append kolhapur date filter
+      query += ` AND l.kolhapur_associate_visit_date = ?`;
       params.push(date);
     }
 
-    // Order chronologically
-    query += ` ORDER BY l.field_visit_date ASC, l.field_visit_time ASC`;
+    // 📝 CHANGED: Query ORDER BY updated to use kolhapur_associate columns
+    query += ` ORDER BY l.kolhapur_associate_visit_date ASC, l.kolhapur_associate_visit_time ASC`;
 
-    // Execute query
     const [leads] = await pool.query(query, params);
 
-    // Process Leads
     for (const lead of leads) {
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
@@ -874,8 +859,7 @@ export const getScheduledFieldVisits = async (req, res) => {
       lead.attachments = attachments;
 
       if (!lead.assigned_employee_name?.trim()) {
-        lead.assigned_employee_name =
-          lead.assigned_employee_username || "Unknown";
+        lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
       }
 
       if (!lead.created_by_name?.trim()) {
@@ -886,7 +870,6 @@ export const getScheduledFieldVisits = async (req, res) => {
       delete lead.created_by_username;
     }
 
-    // Return Response
     return res.status(200).json({
       message: date
         ? `Scheduled visits for ${date} fetched successfully`
@@ -897,18 +880,18 @@ export const getScheduledFieldVisits = async (req, res) => {
       leads,
     });
   } catch (error) {
-    console.error("Error fetching scheduled field visits:", error);
+    console.error("Error fetching scheduled visits:", error);
     return res.status(500).json({ error: "Server error" });
   }
 };
 
-/* ---------------- Update Field Visit Status (Start / Complete) ---------------- */
-export const updateFieldVisitStatus = async (req, res) => {
+/* ---------------- Update Visit Status (Start / Complete) ---------------- */
+// 📝 CHANGED: Function name updated to updateKolhapurAssociateVisitStatus
+export const updateKolhapurAssociateVisitStatus = async (req, res) => {
   try {
     const { lead_id, status, location } = req.body;
     const employeeId = req.user.employee_id;
 
-    // ✅ Basic Validation
     if (!lead_id || !status) {
       return res.status(400).json({ error: "lead_id and status are required." });
     }
@@ -917,8 +900,6 @@ export const updateFieldVisitStatus = async (req, res) => {
       return res.status(400).json({ error: "Invalid status. Use Started, Completed, Cancelled, or Pending." });
     }
 
-    // ✅ Verify Lead & Assignment
-    // Adjusted to also fetch `lead_stage` for the backup logs
     const [existing] = await pool.query(
       "SELECT assigned_employee, lead_stage FROM leads WHERE lead_id = ?",
       [lead_id]
@@ -930,49 +911,46 @@ export const updateFieldVisitStatus = async (req, res) => {
 
     const oldLead = existing[0];
 
-    // Security check: Only the assigned employee can update their own visit status
     if (oldLead.assigned_employee !== employeeId) {
       return res.status(403).json({ error: "Forbidden: You are not assigned to this lead's field visit." });
     }
 
-    // ✅ Dynamic Update Logic for the Leads Table
     let query = "";
     let params = [];
 
     if (status === "Started") {
-      // If they are starting, a location is mandatory
       if (!location) {
         return res.status(400).json({ error: "Start location is required when starting a visit." });
       }
+      // 📝 CHANGED: Database UPDATE columns mapped to kolhapur_associate_*
       query = `
         UPDATE leads 
-        SET field_lead_visit_status = ?, field_visit_start_location = ?, updated_at = NOW() 
+        SET kolhapur_associate_lead_visit_status = ?, kolhapur_associate_visit_start_location = ?, updated_at = NOW() 
         WHERE lead_id = ?
       `;
       params = [status, location, lead_id];
 
     } else {
-      // If Completed, Cancelled, or Pending, just update the status
+      // 📝 CHANGED: Database UPDATE columns mapped to kolhapur_associate_*
       query = `
         UPDATE leads 
-        SET field_lead_visit_status = ?, updated_at = NOW() 
+        SET kolhapur_associate_lead_visit_status = ?, updated_at = NOW() 
         WHERE lead_id = ?
       `;
       params = [status, lead_id];
     }
 
-    // Execute the leads table update
     await pool.query(query, params);
 
-    // ✅ Insert into Lead Activity Backup
-    // Determine the type of change and formulate a reason message based on status
-    const changeType = status === "Started" ? "Field Visit Started" :
-                       status === "Completed" ? "Field Visit Completed" :
-                       `Field Visit ${status}`;
+    // 📝 CHANGED: changeType logic strings updated for Kolhapur Associate
+    const changeType = status === "Started" ? "Kolhapur Associate Visit Started" :
+                       status === "Completed" ? "Kolhapur Associate Visit Completed" :
+                       `Kolhapur Associate Visit ${status}`;
 
+    // 📝 CHANGED: reasonText logic strings updated for Kolhapur Associates
     const reasonText = status === "Started" 
-      ? `Field visit started at location: ${location}` 
-      : `Field visit status updated to ${status}`;
+      ? `Kolhapur Associates visit started at location: ${location}` 
+      : `Kolhapur Associates visit status updated to ${status}`;
 
     await pool.query(
       `
@@ -994,18 +972,18 @@ export const updateFieldVisitStatus = async (req, res) => {
       [
         lead_id,
         oldLead.lead_stage,
-        oldLead.lead_stage, // Stage remains the same during a visit update
+        oldLead.lead_stage,
         oldLead.assigned_employee,
-        oldLead.assigned_employee, // Assignee remains the same
+        oldLead.assigned_employee, 
         employeeId,
-        req.user.department_id || "Field-Marketing", // Fallback if department_id is missing
+        // 📝 CHANGED: Fallback department updated
+        req.user.department_id || "Kolhapur-Associates",
         req.user.role_id,
         changeType,
         reasonText
       ]
     );
 
-    // ✅ Return Response
     return res.status(200).json({
       message: `Visit status updated to '${status}' successfully.`,
       lead_id,
@@ -1014,28 +992,29 @@ export const updateFieldVisitStatus = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error updating field visit status:", error);
+    console.error("Error updating visit status:", error);
     res.status(500).json({ error: "Server error while updating status" });
   }
 };
 
-/* ---------------- Reschedule Field Visit ---------------- */
-export const rescheduleFieldVisits = async (req, res) => {
+/* ---------------- Reschedule Visit ---------------- */
+// 📝 CHANGED: Function name updated to rescheduleKolhapurAssociateVisits
+export const rescheduleKolhapurAssociateVisits = async (req, res) => {
   try {
     const { lead_id, new_visit_date, new_visit_time, reason } = req.body;
     const employeeId = req.user.employee_id;
-    const departmentId = req.user.department_id || "Field-Marketing";
+    // 📝 CHANGED: Fallback department updated
+    const departmentId = req.user.department_id || "Kolhapur-Associates";
 
-    // ✅ Basic Validation
     if (!lead_id || !new_visit_date || !new_visit_time) {
       return res.status(400).json({ 
         error: "lead_id, new_visit_date, and new_visit_time are required." 
       });
     }
 
-    // ✅ Verify Lead & Assignment
+    // 📝 CHANGED: Selected columns updated to kolhapur_associate_*
     const [existing] = await pool.query(
-      "SELECT assigned_employee, lead_stage, field_visit_date, field_visit_time FROM leads WHERE lead_id = ?",
+      "SELECT assigned_employee, lead_stage, kolhapur_associate_visit_date, kolhapur_associate_visit_time FROM leads WHERE lead_id = ?",
       [lead_id]
     );
 
@@ -1045,37 +1024,32 @@ export const rescheduleFieldVisits = async (req, res) => {
 
     const oldLead = existing[0];
 
-    // Security check: Only the assigned employee can reschedule their own visit
     if (oldLead.assigned_employee !== employeeId) {
       return res.status(403).json({ 
         error: "Forbidden: You are not assigned to this lead's field visit." 
       });
     }
 
-    // Format old date/time safely for the log message
-    // Converts Date object to YYYY-MM-DD format
-    const oldDate = oldLead.field_visit_date 
-      ? new Date(oldLead.field_visit_date).toISOString().split('T')[0] 
+    // 📝 CHANGED: Read from correct object properties
+    const oldDate = oldLead.kolhapur_associate_visit_date 
+      ? new Date(oldLead.kolhapur_associate_visit_date).toISOString().split('T')[0] 
       : "Unscheduled";
-    const oldTime = oldLead.field_visit_time || "Unscheduled";
+    const oldTime = oldLead.kolhapur_associate_visit_time || "Unscheduled";
 
-    // ✅ 1. Update Leads Table 
-    // Updates the date/time and resets the visit status to 'Pending'
+    // 📝 CHANGED: UPDATE query columns updated to kolhapur_associate_*
     await pool.query(
       `
       UPDATE leads 
       SET 
-        field_visit_date = ?, 
-        field_visit_time = ?, 
-        field_lead_visit_status = 'Pending', 
+        kolhapur_associate_visit_date = ?, 
+        kolhapur_associate_visit_time = ?, 
+        kolhapur_associate_lead_visit_status = 'Pending', 
         updated_at = NOW() 
       WHERE lead_id = ?
       `,
       [new_visit_date, new_visit_time, lead_id]
     );
 
-    // ✅ 2. Insert into Lead Activity Backup
-    // Build the dynamic string you requested
     const reasonText = `Lead rescheduled from ${oldDate} ${oldTime} to ${new_visit_date} ${new_visit_time} by employee ${employeeId}. Department: ${departmentId}. ${reason ? `Reason: ${reason}` : ''}`;
 
     await pool.query(
@@ -1098,20 +1072,21 @@ export const rescheduleFieldVisits = async (req, res) => {
       [
         lead_id,
         oldLead.lead_stage,
-        oldLead.lead_stage, // Stage remains unchanged
+        oldLead.lead_stage, 
         oldLead.assigned_employee,
-        oldLead.assigned_employee, // Assignee remains unchanged
+        oldLead.assigned_employee, 
         employeeId,
         departmentId,
         req.user.role_id,
-        "Field Visit Rescheduled",
+        // 📝 CHANGED: Backup log reason updated
+        "Kolhapur Associate Visit Rescheduled",
         reasonText.trim()
       ]
     );
 
-    // ✅ Return Response
     return res.status(200).json({
-      message: "Field visit rescheduled successfully.",
+      // 📝 CHANGED: Response message updated
+      message: "Kolhapur Associates visit rescheduled successfully.",
       lead_id,
       new_visit_date,
       new_visit_time,
@@ -1120,35 +1095,35 @@ export const rescheduleFieldVisits = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error rescheduling field visit:", error);
+    console.error("Error rescheduling visit:", error);
     res.status(500).json({ error: "Server error while rescheduling visit" });
   }
 };
 
 
-/* ---------------- Get Completed Leads (Based on Activity Logs) ---------------- */
-
-export const getCompletedFieldVisits = async (req, res) => {
+/* ---------------- Get Completed Leads ---------------- */
+// 📝 CHANGED: Function name updated to getCompletedKolhapurAssociateVisits
+export const getCompletedKolhapurAssociateVisits = async (req, res) => {
   try {
     const roleId = req.user.role_id;
     const employeeId = req.user.employee_id;
 
-    const allowedRoles = ["Field-Marketing-Head", "Field-Marketing-Employee"];
+    // 📝 CHANGED: Allowed roles updated
+    const allowedRoles = ["Kolhapur-Associates-Head", "Kolhapur-Associates-Employee"];
     if (!allowedRoles.includes(roleId)) {
       return res.status(403).json({
-        error: "Forbidden: Only Field Marketing Team members can access this data.",
+        error: "Forbidden: Only Kolhapur Associates Team members can access this data.",
       });
     }
 
     let query = "";
     let params = [];
 
-    // ✅ Shared Logic: We need to JOIN leads -> backup -> employees
-    // This finds the user who performed the 'visit_completed' action
+    // 📝 CHANGED: JOIN condition mapped to check for 'Kolhapur Associate Visit Completed'
     const baseJoins = `
       FROM leads l
       LEFT JOIN lead_activity_backup lab 
-        ON l.lead_id = lab.lead_id AND lab.change_type = 'Field Visit Completed'
+        ON l.lead_id = lab.lead_id AND lab.change_type = 'Kolhapur Associate Visit Completed'
       LEFT JOIN employees e 
         ON lab.changed_by COLLATE utf8mb4_unicode_ci = e.employee_id COLLATE utf8mb4_unicode_ci
     `;
@@ -1161,22 +1136,21 @@ export const getCompletedFieldVisits = async (req, res) => {
       e.username
     `;
 
-    // ✅ CASE 1: HEAD (Sees ALL completed visits)
-    if (roleId === "Field-Marketing-Head") {
+    // 📝 CHANGED: Role check condition updated to 'Kolhapur-Associates-Head'
+    if (roleId === "Kolhapur-Associates-Head") {
       query = `
         SELECT ${selectFields}
         ${baseJoins}
-        WHERE l.field_lead_visit_status = 'Completed'
+        -- 📝 CHANGED: WHERE condition checks kolhapur_associate_lead_visit_status
+        WHERE l.kolhapur_associate_lead_visit_status = 'Completed'
         ORDER BY l.updated_at DESC
       `;
-    } 
-    
-    // ✅ CASE 2: EMPLOYEE (Sees only visits THEY completed or were assigned to)
-    else {
+    } else {
       query = `
         SELECT DISTINCT ${selectFields}
         ${baseJoins}
-        WHERE l.field_lead_visit_status = 'Completed'
+        -- 📝 CHANGED: WHERE condition checks kolhapur_associate_lead_visit_status
+        WHERE l.kolhapur_associate_lead_visit_status = 'Completed'
         AND (lab.changed_by = ? OR lab.old_assigned_employee = ?)
         ORDER BY l.updated_at DESC
       `;
@@ -1185,21 +1159,17 @@ export const getCompletedFieldVisits = async (req, res) => {
 
     const [leads] = await pool.query(query, params);
 
-    // ✅ Process results to format names and add attachments
     for (const lead of leads) {
-      // 1. Format the "Completed By" Name
       if (lead.first_name && lead.last_name) {
         lead.completed_by_name = `${lead.first_name} ${lead.last_name}`;
       } else {
         lead.completed_by_name = lead.username || "Unknown";
       }
 
-      // Cleanup: Remove raw join fields to keep JSON clean (optional)
       delete lead.first_name;
       delete lead.last_name;
       delete lead.username;
 
-      // 2. Fetch Attachments
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
@@ -1208,28 +1178,118 @@ export const getCompletedFieldVisits = async (req, res) => {
     }
 
     return res.status(200).json({
-      message: "Completed Field-Marketing visits fetched successfully",
-      view_mode: roleId === "Field-Marketing-Head" ? "All Team Data" : "Personal History",
+      // 📝 CHANGED: Response message updated
+      message: "Completed Kolhapur Associates visits fetched successfully",
+      // 📝 CHANGED: Role check in response object updated
+      view_mode: roleId === "Kolhapur-Associates-Head" ? "All Team Data" : "Personal History",
       total: leads.length,
       leads,
     });
   } catch (error) {
-    console.error("Error fetching completed Field-Marketing visits:", error);
+    console.error("Error fetching completed visits:", error);
+    res.status(500).json({ error: "Server error" });
+  }
+};
+
+/* ---------------- Today's Visits (All Employees) ---------------- */
+// 📝 CHANGED: Function name updated to KolhapurAssociateTeamTodaysVisits
+export const KolhapurAssociateTeamTodaysVisits = async (req, res) => {
+  try {
+    const roleId = req.user.role_id;
+
+    // 📝 CHANGED: Role check updated to include 'Kolhapur-Associates-Head'
+    if (!["Kolhapur-Associates-Head", "IpqsHead"].includes(roleId)) {
+      return res.status(403).json({
+        error: "Forbidden: Only Kolhapur Associates Head or IpqsHead can access this.",
+      });
+    }
+
+    let targetDate = req.query.date;
+    if (!targetDate) {
+      const localDate = new Date();
+      const tzOffset = localDate.getTimezoneOffset() * 60000;
+      targetDate = new Date(localDate - tzOffset).toISOString().split('T')[0];
+    }
+    
+    // 📝 CHANGED: Query updated to search for '%Kolhapur-Associates%' departments
+    const [employees] = await pool.query(
+      `SELECT employee_id, first_name, last_name, username, email, department_id 
+       FROM employees 
+       WHERE department_id LIKE '%Kolhapur-Associates%' AND status = 'active'`
+    );
+    
+    // 📝 CHANGED: Query updated to check kolhapur_associate_visit_date and lead_stage
+    const [leads] = await pool.query(
+      `SELECT * FROM leads 
+       WHERE lead_stage LIKE '%Kolhapur-Associates%' 
+       AND kolhapur_associate_visit_date = ? 
+       ORDER BY kolhapur_associate_visit_time ASC`,
+      [targetDate]
+    );
+    
+    const employeeMap = {};
+    const unassigned_leads = [];
+
+    employees.forEach((emp) => {
+      employeeMap[emp.employee_id] = {
+        employee_id: emp.employee_id,
+        employee_name: (emp.first_name && emp.last_name) ? `${emp.first_name} ${emp.last_name}` : emp.username,
+        email: emp.email,
+        total_todays_visits: 0,
+        leads: []
+      };
+    });
+
+    for (const lead of leads) {
+      const [attachments] = await pool.query(
+        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
+        [lead.lead_id]
+      );
+      lead.attachments = attachments;
+
+      const empId = lead.assigned_employee;
+
+      if (empId === "0" || !empId) {
+        unassigned_leads.push(lead);
+      } else if (employeeMap[empId]) {
+        employeeMap[empId].leads.push(lead);
+        employeeMap[empId].total_todays_visits += 1;
+      } else {
+        unassigned_leads.push(lead); 
+      }
+    }
+
+    const employeeData = Object.values(employeeMap);
+
+    res.status(200).json({
+      // 📝 CHANGED: Response message and department tag updated
+      message: `Kolhapur Associates visits for ${targetDate} fetched successfully`,
+      date: targetDate, 
+      accessed_by: roleId,
+      department: "Kolhapur-Associates",
+      total_employees: employeeData.length,
+      total_unassigned_todays_visits: unassigned_leads.length,
+      employees: employeeData,
+      unassigned_leads: unassigned_leads
+    });
+
+  } catch (error) {
+    console.error("Error fetching Today's visits:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
 
 
-
 // Dashboard Hot Leads API
 
 /* ---------------- Get Hot Leads (Role-Based) ---------------- */
-export const getHotFieldLeads = async (req, res) => {
+// 📝 CHANGED: Function name updated to getHotKolhapurAssociateLeads
+export const getHotKolhapurAssociateLeads = async (req, res) => {
   try {
     const roleId = req.user.role_id;
     const employeeId = req.user.employee_id;
 
-    // ✅ Base Query: Get leads in Field-Marketing that are marked as HOT
+    // 📝 CHANGED: WHERE condition updated for 'Kolhapur-Associates' lead stage
     let query = `
       SELECT 
         l.*,
@@ -1242,26 +1302,23 @@ export const getHotFieldLeads = async (req, res) => {
         ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
       LEFT JOIN employees creator 
         ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
-      WHERE l.lead_stage = 'Field-Marketing'
+      WHERE l.lead_stage = 'Kolhapur-Associates'
         AND (l.mark_as_hot_lead = 1 OR l.mark_as_hot_lead = TRUE)
     `;
 
     const params = [];
 
-    // ✅ Role-Based Access Control
-    // If the user is NOT a Head, restrict the query to only their assigned leads
-    const headRoles = ["Field-Marketing-Head", "IpqsHead"];
+    // 📝 CHANGED: Head roles check array updated
+    const headRoles = ["Kolhapur-Associates-Head", "IpqsHead"];
     if (!headRoles.includes(roleId)) {
       query += ` AND l.assigned_employee = ?`;
       params.push(employeeId);
     }
 
-    // Order by newest first
     query += ` ORDER BY l.created_at DESC`;
 
     const [leads] = await pool.query(query, params);
 
-    // ✅ Process Leads (Fetch Attachments & Clean up names)
     for (const lead of leads) {
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
@@ -1269,7 +1326,6 @@ export const getHotFieldLeads = async (req, res) => {
       );
       lead.attachments = attachments;
 
-      // Ensure names fall back to username or "Unknown" safely
       if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
       if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
       
@@ -1277,7 +1333,6 @@ export const getHotFieldLeads = async (req, res) => {
       delete lead.created_by_username;
     }
 
-    // ✅ Return Response
     return res.status(200).json({
       message: "Hot leads fetched successfully",
       view_mode: headRoles.includes(roleId) ? "All Team Hot Leads" : "My Assigned Hot Leads",
@@ -1286,34 +1341,35 @@ export const getHotFieldLeads = async (req, res) => {
     });
 
   } catch (error) {
-    console.error("Error fetching hot field leads:", error);
+    console.error("Error fetching hot leads:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
 
-/* ---------------- Get Field Marketing Employees & Detailed Expected Revenue ---------------- */
-export const getFieldMarketingEmployeesRevenue = async (req, res) => {
+/* ---------------- Get Employees & Detailed Expected Revenue ---------------- */
+// 📝 CHANGED: Function name updated to getKolhapurAssociatesEmployeesRevenue
+export const getKolhapurAssociatesEmployeesRevenue = async (req, res) => {
   try {
     const roleId = req.user.role_id;
     
-    // ✅ Security check: Only Field-Marketing-Head and IpqsHead
-    const allowedRoles = ["Field-Marketing-Head", "Field-Marketing-Employee", "IpqsHead"];
+    // 📝 CHANGED: Allowed roles updated
+    const allowedRoles = ["Kolhapur-Associates-Head", "Kolhapur-Associates-Employee", "IpqsHead"];
     if (!allowedRoles.includes(roleId)) {
       return res.status(403).json({ 
         error: "Forbidden: Only authorized Heads can access this data." 
       });
     }
 
-    // ✅ 1. Fetch all active Field Marketing employees
+    // 📝 CHANGED: Query updated to fetch 'Kolhapur-Associates' employees
     const empQuery = `
       SELECT 
         employee_id, first_name, last_name, username, email, contact_number
       FROM employees
-      WHERE department_id = 'Field-Marketing' AND status = 'active'
+      WHERE department_id = 'Kolhapur-Associates' AND status = 'active'
     `;
     const [employees] = await pool.query(empQuery);
 
-    // ✅ 2. Fetch all completed leads and their revenue details
+    // 📝 CHANGED: Query updated to check kolhapur_associate_lead_visit_status and change_type
     const leadsQuery = `
       SELECT 
         lab.old_assigned_employee AS employee_id,
@@ -1323,16 +1379,14 @@ export const getFieldMarketingEmployeesRevenue = async (req, res) => {
         COALESCE(l.expected_revenue, 0) AS expected_revenue
       FROM lead_activity_backup lab
       INNER JOIN leads l ON lab.lead_id = l.lead_id
-      WHERE lab.change_type = 'Field Visit Completed'
-        AND l.field_lead_visit_status = 'Completed'
+      WHERE lab.change_type = 'Kolhapur Associate Visit Completed'
+        AND l.kolhapur_associate_lead_visit_status = 'Completed'
     `;
     const [leads] = await pool.query(leadsQuery);
 
-    // ✅ 3. Grouping Logic & Global Total Calculation
     const employeeMap = {};
-    let totalExpectedRevenueAllEmployees = 0; // NEW: Global counter
+    let totalExpectedRevenueAllEmployees = 0; 
 
-    // Initialize the map with all active Field Marketing employees
     employees.forEach(emp => {
       employeeMap[emp.employee_id] = {
         employee_id: emp.employee_id,
@@ -1341,15 +1395,13 @@ export const getFieldMarketingEmployeesRevenue = async (req, res) => {
         contact_number: emp.contact_number,
         completed_leads_count: 0,
         total_expected_revenue: 0,
-        completed_leads: [] // This will hold the specific leads
+        completed_leads: [] 
       };
     });
 
-    // Populate the map with lead data
     leads.forEach(lead => {
       const empId = lead.employee_id;
       
-      // If the employee exists in our map, add the lead details to their array
       if (employeeMap[empId]) {
         const leadRevenue = Number(lead.expected_revenue);
         
@@ -1360,23 +1412,20 @@ export const getFieldMarketingEmployeesRevenue = async (req, res) => {
           expected_revenue: leadRevenue
         });
         
-        // Increment the individual employee's totals
         employeeMap[empId].completed_leads_count += 1;
         employeeMap[empId].total_expected_revenue += leadRevenue;
         
-        // Increment the global total for all employees
         totalExpectedRevenueAllEmployees += leadRevenue; 
       }
     });
 
-    // Convert the object map back into an array and sort by highest revenue
     const results = Object.values(employeeMap).sort((a, b) => b.total_expected_revenue - a.total_expected_revenue);
 
-    // ✅ Return Response
     return res.status(200).json({
-      message: "Field Marketing employees and detailed revenue fetched successfully",
+      // 📝 CHANGED: Response message updated
+      message: "Kolhapur Associates employees and detailed revenue fetched successfully",
       total_employees: results.length,
-      total_expected_revenue_all_employees: totalExpectedRevenueAllEmployees, // NEW: Added to response
+      total_expected_revenue_all_employees: totalExpectedRevenueAllEmployees, 
       data: results
     });
 
@@ -1391,24 +1440,23 @@ export const getNewAssignedLeadsSummary = async (req, res) => {
   try {
     const roleId = req.user.role_id;
     
-    // ✅ Security check: Only Field-Marketing-Head and IpqsHead
-    const allowedRoles = ["Field-Marketing-Head", "Field-Marketing-Employee", "IpqsHead"];
+    // 📝 CHANGED: Allowed roles updated
+    const allowedRoles = ["Kolhapur-Associates-Head", "Kolhapur-Associates-Employee", "IpqsHead"];
     if (!allowedRoles.includes(roleId)) {
       return res.status(403).json({ 
         error: "Forbidden: Only authorized Heads can access this data." 
       });
     }
 
-    // ✅ 1. Fetch all active Field Marketing employees
+    // 📝 CHANGED: Query updated to fetch 'Kolhapur-Associates' employees
     const empQuery = `
       SELECT employee_id, first_name, last_name, username 
       FROM employees 
-      WHERE department_id = 'Field-Marketing' AND status = 'active'
+      WHERE department_id = 'Kolhapur-Associates' AND status = 'active'
     `;
     const [employees] = await pool.query(empQuery);
 
-    // ✅ 2. Fetch all 'new' leads assigned to the Field-Marketing stage
-    // Using a subquery to get the exact time it was assigned to this employee
+    // 📝 CHANGED: Query updated for lead_stage 'Kolhapur-Associates'
     const leadsQuery = `
       SELECT 
         l.lead_id, 
@@ -1423,17 +1471,15 @@ export const getNewAssignedLeadsSummary = async (req, res) => {
           l.created_at
         ) AS assigned_on
       FROM leads l
-      WHERE l.lead_stage = 'Field-Marketing' 
+      WHERE l.lead_stage = 'Kolhapur-Associates' 
         AND l.lead_status = 'new'
     `;
     const [leads] = await pool.query(leadsQuery);
 
-    // ✅ 3. Grouping Logic & Today's Date Calculation
     const employeeMap = {};
     let totalNewLeads = 0;
     let totalNewLeadsToday = 0;
 
-    // Helper function to check if a date is "today"
     const today = new Date();
     const isToday = (dateString) => {
       if (!dateString) return false;
@@ -1445,22 +1491,19 @@ export const getNewAssignedLeadsSummary = async (req, res) => {
       );
     };
 
-    // Initialize the map with all active Field Marketing employees
     employees.forEach((emp) => {
       employeeMap[emp.employee_id] = {
         employee_id: emp.employee_id,
         employee_name: (emp.first_name && emp.last_name) ? `${emp.first_name} ${emp.last_name}` : emp.username,
         total_assigned: 0,
-        today_assigned: 0, // NEW: Track today's assignments per employee
+        today_assigned: 0, 
         assigned_leads: [] 
       };
     });
 
-    // Populate the map with lead data
     leads.forEach((lead) => {
       const empId = lead.assigned_employee;
       
-      // If the assigned employee exists in our Field Marketing map
       if (employeeMap[empId]) {
         employeeMap[empId].assigned_leads.push({
           lead_id: lead.lead_id,
@@ -1469,24 +1512,18 @@ export const getNewAssignedLeadsSummary = async (req, res) => {
           assigned_on: lead.assigned_on 
         });
         
-        // Increment the individual employee's total counter
         employeeMap[empId].total_assigned += 1;
-        
-        // Increment global total
         totalNewLeads += 1;
         
-        // Check if created/assigned today
         if (isToday(lead.assigned_on)) {
-          totalNewLeadsToday += 1; // Increment global today counter
-          employeeMap[empId].today_assigned += 1; // NEW: Increment employee's today counter
+          totalNewLeadsToday += 1; 
+          employeeMap[empId].today_assigned += 1; 
         }
       }
     });
 
-    // Convert object to array and sort by those who have the most leads assigned overall
     const results = Object.values(employeeMap).sort((a, b) => b.total_assigned - a.total_assigned);
 
-    // ✅ Return Response
     return res.status(200).json({
       message: "New assigned leads summary fetched successfully",
       total_new_leads_overall: totalNewLeads,
@@ -1506,52 +1543,57 @@ export const getSalesFunnel = async (req, res) => {
     const roleId = req.user.role_id;
     const employeeId = req.user.employee_id;
 
-    // ✅ Determine Access Level
-    const isHead = ["Field-Marketing-Head", "IpqsHead"].includes(roleId);
+    // 📝 CHANGED: Role check updated to check for 'Kolhapur-Associates-Head'
+    const isHead = ["Kolhapur-Associates-Head", "IpqsHead"].includes(roleId);
+    const params = isHead ? [] : [employeeId, employeeId];
 
-    // Conditional SQL clauses based on role
-    const assignedFilter = isHead ? "" : "AND assigned_employee = ?";
-    const backupFilter = isHead ? "" : "AND old_assigned_employee = ?";
-    const params = isHead ? [] : [employeeId];
-
-    // ✅ 1. Get current leads, scheduled visits, and completed visits
-    const baseQuery = `
+    // 📝 CHANGED: Query updated to pull kolhapur_associate_* fields and check stage
+    const funnelQuery = `
       SELECT 
-        COUNT(*) as current_leads,
-        COALESCE(SUM(CASE WHEN field_visit_date IS NOT NULL THEN 1 ELSE 0 END), 0) as scheduled_visits,
-        COALESCE(SUM(CASE WHEN field_lead_visit_status = 'Completed' THEN 1 ELSE 0 END), 0) as completed_visits
-      FROM leads
-      WHERE lead_stage = 'Field-Marketing' ${assignedFilter}
+        l.lead_id, 
+        l.kolhapur_associate_visit_date, 
+        l.kolhapur_associate_lead_visit_status, 
+        l.lead_stage
+      FROM leads l
+      WHERE 
+        (l.lead_stage = 'Kolhapur-Associates' ${isHead ? "" : "AND l.assigned_employee = ?"})
+        OR 
+        l.lead_id IN (
+          SELECT lead_id 
+          FROM lead_activity_backup 
+          WHERE old_lead_stage = 'Kolhapur-Associates' 
+            AND new_lead_stage != 'Kolhapur-Associates'
+            ${isHead ? "" : "AND old_assigned_employee = ?"}
+        )
     `;
-    const [baseResult] = await pool.query(baseQuery, params);
 
-    // ✅ 2. Get transferred leads 
-    // (Leads that used to be in Field-Marketing but were moved to another stage)
-    const transferQuery = `
-      SELECT COUNT(DISTINCT lead_id) as transferred_visits
-      FROM lead_activity_backup
-      WHERE old_lead_stage = 'Field-Marketing'
-        AND new_lead_stage != 'Field-Marketing'
-        ${backupFilter}
-    `;
-    const [transferResult] = await pool.query(transferQuery, params);
+    const [funnelLeads] = await pool.query(funnelQuery, params);
 
-    // ✅ 3. Extract & Calculate Math
-    const currentLeads = Number(baseResult[0].current_leads);
-    const scheduledVisits = Number(baseResult[0].scheduled_visits);
-    const completedVisits = Number(baseResult[0].completed_visits);
-    const transferredVisits = Number(transferResult[0].transferred_visits);
+    let totalFunnelLeads = funnelLeads.length;
+    let scheduledVisits = 0;
+    let completedVisits = 0;
+    let transferredVisits = 0;
 
-    // The true 100% baseline includes leads currently here PLUS leads that moved forward
-    const totalFunnelLeads = currentLeads + transferredVisits;
+    funnelLeads.forEach((lead) => {
+      // 📝 CHANGED: Accessing the specific date column mapped to Kolhapur
+      if (lead.kolhapur_associate_visit_date) {
+        scheduledVisits++;
+      }
+      // 📝 CHANGED: Accessing the specific status column mapped to Kolhapur
+      if (lead.kolhapur_associate_lead_visit_status === 'Completed') {
+        completedVisits++;
+      }
+      // 📝 CHANGED: Checking lead stage transfer logic
+      if (lead.lead_stage !== 'Kolhapur-Associates') {
+        transferredVisits++;
+      }
+    });
 
-    // Helper to calculate percentage safely without dividing by zero
     const calcPercent = (part, total) => {
       if (total === 0) return "0%";
       return Math.round((part / total) * 100) + "%";
     };
 
-    // Build the final payload formatted exactly for the UI
     const responseData = {
       total_leads: {
         count: totalFunnelLeads,
@@ -1571,7 +1613,6 @@ export const getSalesFunnel = async (req, res) => {
       }
     };
 
-    // ✅ Return Response
     return res.status(200).json({
       message: "Sales funnel data fetched successfully",
       view_mode: isHead ? "All Team Funnel" : "My Personal Funnel",
@@ -1585,115 +1626,20 @@ export const getSalesFunnel = async (req, res) => {
 };
 
 
-
-
-
-
-
-
-
-
-/* ---------------- Today's Field Visits (All Employees) ---------------- */
-export const FieldTeamTodaysVisits = async (req, res) => {
-  try {
-    const roleId = req.user.role_id;
-
-    // ✅ Allow only Field-Marketing-Head or IpqsHead
-    if (!["Field-Marketing-Head", "IpqsHead"].includes(roleId)) {
-      return res.status(403).json({
-        error: "Forbidden: Only Field-Marketing Head or IpqsHead can access this.",
-      });
-    }
-
-    // ✅ Fetch employees in Field-Marketing
-    const [employees] = await pool.query(
-      "SELECT employee_id, username, email, role_id FROM employees WHERE department_id = 'Field-Marketing'"
-    );
-
-    const data = { employees: [], unassigned_leads: [] };
-
-    // ✅ 1. Get Today's Visits for each Employee
-    for (const emp of employees) {
-      const [leads] = await pool.query(
-        `SELECT * FROM leads 
-         WHERE assigned_employee = ? 
-         AND lead_stage = 'Field-Marketing' 
-         AND field_visit_date = CURDATE() 
-         ORDER BY field_visit_time ASC`,
-        [emp.employee_id]
-      );
-
-      for (const lead of leads) {
-        const [attachments] = await pool.query(
-          "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
-          [lead.lead_id]
-        );
-        lead.attachments = attachments;
-      }
-
-      // Only push employee if they actually have visits today (Optional - typically Heads want to see everyone)
-      // Currently pushing everyone, with 0 leads if they have none.
-      data.employees.push({ ...emp, total_todays_visits: leads.length, leads });
-    }
-
-    // ✅ 2. Get Today's Unassigned Visits (Rare, but possible)
-    const [unassigned] = await pool.query(
-      `SELECT * FROM leads 
-       WHERE assigned_employee = '0' 
-       AND lead_stage = 'Field-Marketing' 
-       AND field_visit_date = CURDATE()
-       ORDER BY field_visit_time ASC`
-    );
-
-    for (const lead of unassigned) {
-      const [attachments] = await pool.query(
-        "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
-        [lead.lead_id]
-      );
-      lead.attachments = attachments;
-    }
-
-    data.unassigned_leads = unassigned;
-
-    res.status(200).json({
-      message: "Today's Field-Marketing visits fetched successfully",
-      date: new Date().toISOString().split('T')[0], // Shows current date YYYY-MM-DD
-      accessed_by: roleId,
-      department: "Field-Marketing",
-      total_employees: data.employees.length,
-      total_unassigned_todays_visits: data.unassigned_leads.length,
-      ...data,
-    });
-  } catch (error) {
-    console.error("Error fetching Today's Field-Marketing visits:", error);
-    res.status(500).json({ error: "Server error" });
-  }
-};
-
-
-
-
-
-
-
-
-
-
-
-
-
 /* ------------------------ Get all leads (IpqsHead) ----------------------- */
 export const getAllLeadsForIpqsHead = async (req, res) => {
   try {
     const { role_id, department_id, employee_id } = req.user;
 
     if (role_id !== "IpqsHead" || department_id !== "IpqsHead") {
-      return res.status(403).json({ error: "Forbidden: Only IpqsHead can access all leads." });
+      return res
+        .status(403)
+        .json({ error: "Forbidden: Only IpqsHead can access all leads." });
     }
 
     const [leads] = await pool.query(`SELECT * FROM leads ORDER BY created_at DESC`);
 
-    for (let lead of leads) {
+    for (const lead of leads) {
       const [attachments] = await pool.query(
         `SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?`,
         [lead.lead_id]
@@ -1701,7 +1647,7 @@ export const getAllLeadsForIpqsHead = async (req, res) => {
       lead.attachments = attachments;
     }
 
-    return res.status(200).json({
+    res.status(200).json({
       message: "All leads fetched successfully",
       viewed_by: employee_id,
       total: leads.length,
@@ -1713,32 +1659,31 @@ export const getAllLeadsForIpqsHead = async (req, res) => {
   }
 };
 
+/* --------------------------- Revert Follow-up --------------------------- */
 export const revertLeadToNew = async (req, res) => {
   try {
-    const { id } = req.params; // lead_id
+    const { id } = req.params;
 
     const [rows] = await pool.query("SELECT lead_status FROM leads WHERE lead_id = ?", [id]);
-    if (rows.length === 0) return res.status(404).json({ error: "Lead not found" });
+    if (rows.length === 0)
+      return res.status(404).json({ error: "Lead not found" });
+
     if (rows[0].lead_status !== "follow-up") {
-      return res.status(400).json({ error: "Only leads in follow-up can be reverted to new" });
+      return res
+        .status(400)
+        .json({ error: "Only leads in follow-up can be reverted to new" });
     }
 
     await pool.query(
       `UPDATE leads 
-       SET lead_status = 'new', 
-           follow_up_reason = NULL, 
-           follow_up_date = NULL, 
-           follow_up_time = NULL, 
-           updated_at = NOW()
+       SET lead_status = 'new', follow_up_reason = NULL, follow_up_date = NULL, follow_up_time = NULL, updated_at = NOW()
        WHERE lead_id = ?`,
       [id]
     );
 
-    return res.status(200).json({ message: `Lead ${id} reverted to new` });
+    res.status(200).json({ message: `Lead ${id} reverted to new` });
   } catch (error) {
     console.error("Error reverting lead:", error);
     res.status(500).json({ error: "Server error" });
   }
 };
-
-

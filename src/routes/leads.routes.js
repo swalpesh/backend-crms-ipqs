@@ -26,7 +26,10 @@ import {
   updateQuotationCreatedStatus,
   getLeadOriginInfo,
   updatePoConfirmedStatus,
-  getConfirmedRevenueAnalytics
+  getConfirmedRevenueAnalytics,
+  deleteMultipleLeads,
+  getFollowUpLeadsForAdmin,
+  getLeadActivityByUser
 } from "../controllers/leads.controller.js";
 
 
@@ -119,6 +122,8 @@ router.patch(
 router.put("/quotation-created", requireAuth, updateQuotationCreatedStatus);
 router.put("/po-status", requireAuth, updatePoConfirmedStatus);
 
+router.get("/admin/follow-up", requireAuth, getFollowUpLeadsForAdmin);
+
 
 router.get(
   "/all",
@@ -127,6 +132,7 @@ router.get(
   getAllLeadsForIpqsHead
 );
 router.get("/my-accessible-leads", requireAuth, getAccessibleLeads);
+router.delete("/bulk-delete", requireAuth, deleteMultipleLeads);
 
 router.get("/:lead_id", requireAuth, getLeadById);
 router.put("/:lead_id", requireAuth, updateLeadById);
@@ -136,6 +142,9 @@ router.get("/:lead_id/notes", requireAuth, getLeadNotes);
 router.get("/:id/followup-history", getFollowupHistoryByLead);
 
 router.get("/:lead_id/origin", requireAuth, getLeadOriginInfo);
+
+router.get("/:lead_id/activity/:employee_id", getLeadActivityByUser);
+
 
 
 
