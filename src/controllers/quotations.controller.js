@@ -238,11 +238,12 @@ export const getQuotation = async (req, res) => {
 
 
 /**
- * GET /api/v1/quotations/my
- * Fetch all quotations created by the logged-in employee
+ * GET /api/v1/quotations/all
+ * Fetch all quotations created by all employees across the company
  */
 export const listMyQuotations = async (req, res) => {
   try {
+    // We still check for a valid token to ensure the user is logged in
     const employeeId = req.user?.employee_id;
 
     if (!employeeId) {
@@ -256,7 +257,7 @@ export const listMyQuotations = async (req, res) => {
       WHERE status = 'active' AND valid_until < CURRENT_DATE;
     `);
 
-    // ✅ Fetch quotations created by this employee
+    // ✅ Fetch ALL quotations from the system (Removed the WHERE filter)
     const [quotations] = await pool.query(
       `
       SELECT 
@@ -286,18 +287,16 @@ export const listMyQuotations = async (req, res) => {
         q.quotation_stage,
         q.quotation_status,
         q.created_at,
-        q.updated_at
+        q.updated_at,
+        q.created_by -- Added so the frontend knows who owns this quotation
       FROM quotations q
-      WHERE q.created_by = ?
       ORDER BY q.created_at DESC
-      `,
-      [employeeId]
+      `
     );
 
     if (!quotations.length) {
       return res.status(200).json({
-        message: "No quotations found for this employee.",
-        employee_id: employeeId,
+        message: "No quotations found in the system.",
         total: 0,
         quotations: [],
       });
@@ -316,13 +315,12 @@ export const listMyQuotations = async (req, res) => {
     }
 
     return res.status(200).json({
-      message: "Quotations fetched successfully",
-      employee_id: employeeId,
+      message: "All quotations fetched successfully",
       total: quotations.length,
       quotations,
     });
   } catch (error) {
-    console.error("Error fetching quotations by employee:", error);
+    console.error("Error fetching all quotations:", error);
     return res.status(500).json({ message: "Server error while fetching quotations" });
   }
 };
@@ -688,6 +686,149 @@ export const getPaymentsTeamLeadsWithQuotations = async (req, res) => {
 /* -------------------------------------------------------------------------- */
 /* SEND LEAD BACK TO ORIGIN AFTER QUOTATION (2-Step Smart Hunt)               */
 /* -------------------------------------------------------------------------- */
+// export const transferLeadBackFromQuotation = async (req, res) => {
+//   try {
+//     const { lead_id, new_lead_stage, assigned_employee, reason } = req.body;
+    
+//     // Extract acting user details from the JWT
+//     const userId = req.user.employee_id;
+//     const departmentId = req.user.department_id;
+//     const roleId = req.user.role_id;
+
+//     // ✅ Security: Restrict to Quotation Team & IPQS Head
+//     const allowedRoles = [
+//       "IpqsHead",
+//       "Quotation-Team-Head",
+//       "Quotation-Team-Employee",
+//     ];
+
+//     if (!allowedRoles.includes(roleId)) {
+//       return res.status(403).json({
+//         error: "Forbidden: You are not allowed to transfer leads.",
+//       });
+//     }
+
+//     // ✅ Basic Validation
+//     if (!lead_id) {
+//       return res.status(400).json({ error: "lead_id is required." });
+//     }
+
+//     // ✅ Fetch Current Lead Data
+//     const [leadData] = await pool.query("SELECT * FROM leads WHERE lead_id = ?", [lead_id]);
+    
+//     if (leadData.length === 0) {
+//       return res.status(404).json({ error: "Lead not found." });
+//     }
+//     const oldLead = leadData[0];
+
+//     // =========================================================================
+//     // ✅ NEW LOGIC: 2-STEP SMART HUNT
+//     // =========================================================================
+//     let final_lead_stage = new_lead_stage; 
+//     let final_assigned_employee = assigned_employee; 
+
+//     // Fetch history going FORWARDS (oldest first - ID 1, 2, 3...)
+//     const [history] = await pool.query(
+//       `SELECT * FROM lead_activity_backup WHERE lead_id = ? ORDER BY id ASC`,
+//       [lead_id]
+//     );
+
+//     let targetStage = null;
+
+//     // STEP 1: Find the target stage (The first stage that is NOT Tele-Marketing)
+//     for (const log of history) {
+//       if (log.new_lead_stage && !log.new_lead_stage.toLowerCase().includes('tele')) {
+//         targetStage = log.new_lead_stage; // e.g., 'Solutions-Team' or 'Field Marketing'
+//         break; 
+//       }
+//     }
+
+//     // STEP 2: Find the real person associated with that specific target stage
+//     if (targetStage) {
+//       for (const log of history) {
+        
+//         // Scenario A: Did a real person receive it when it entered this stage?
+//         if (log.new_lead_stage === targetStage && log.new_assigned_employee && log.new_assigned_employee !== "0") {
+//           final_assigned_employee = log.new_assigned_employee;
+//           final_lead_stage = targetStage;
+//           break;
+//         }
+        
+//         // Scenario B: Did a real person move it out of this stage? 
+//         if (log.old_lead_stage === targetStage && log.changed_by && log.changed_by !== "0") {
+//           final_assigned_employee = log.changed_by;
+//           final_lead_stage = targetStage;
+//           break;
+//         }
+
+//         // Scenario C: Was a real person holding it when it moved?
+//         if (log.old_lead_stage === targetStage && log.old_assigned_employee && log.old_assigned_employee !== "0") {
+//           final_assigned_employee = log.old_assigned_employee;
+//           final_lead_stage = targetStage;
+//           break;
+//         }
+//       }
+//     }
+//     // =========================================================================
+
+//     // ✅ Safety fallback
+//     if (!final_lead_stage || !final_assigned_employee || final_assigned_employee === "0") {
+//       return res.status(400).json({ 
+//         error: "Could not determine a valid real employee to send the lead back to." 
+//       });
+//     }
+
+//     // ✅ UPDATE QUERY: Changes stage, assigns to the calculated employee, forces 'follow-up'
+//     await pool.query(
+//       `UPDATE leads 
+//        SET lead_stage = ?, 
+//            assigned_employee = ?, 
+//            lead_status = 'follow-up', 
+//            updated_at = NOW()
+//        WHERE lead_id = ?`,
+//       [final_lead_stage, final_assigned_employee, lead_id]
+//     );
+
+//     // ✅ BACKUP QUERY: Logs the exact user and reason for the transfer back
+//     await pool.query(
+//       `INSERT INTO lead_activity_backup 
+//        (lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
+//         changed_by, changed_by_department, changed_by_role, change_type, reason)
+//        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+//       [
+//         lead_id,
+//         oldLead.lead_stage,
+//         final_lead_stage,
+//         oldLead.assigned_employee,
+//         final_assigned_employee, 
+//         userId,
+//         departmentId,
+//         roleId,
+//         "lead_transferred_back",
+//         reason || "Quotation generated. Lead sent back to the appropriate department."
+//       ]
+//     );
+
+//     // ✅ Success Response
+//     res.status(200).json({
+//       message: `Lead ${lead_id} successfully sent back to ${final_lead_stage}.`,
+//       lead_id,
+//       old_lead_stage: oldLead.lead_stage,
+//       new_lead_stage: final_lead_stage,
+//       assigned_employee: final_assigned_employee, 
+//       lead_status: "follow-up",
+//       reason: reason || "Quotation generated. Lead sent back to the appropriate department."
+//     });
+
+//   } catch (error) {
+//     console.error("Error transferring lead back from quotation:", error);
+//     res.status(500).json({ error: "Server error while transferring lead back." });
+//   }
+// };
+
+/* -------------------------------------------------------------------------- */
+/* SEND LEAD BACK TO ORIGIN AFTER QUOTATION (Returns to Creator)              */
+/* -------------------------------------------------------------------------- */
 export const transferLeadBackFromQuotation = async (req, res) => {
   try {
     const { lead_id, new_lead_stage, assigned_employee, reason } = req.body;
@@ -724,63 +865,37 @@ export const transferLeadBackFromQuotation = async (req, res) => {
     const oldLead = leadData[0];
 
     // =========================================================================
-    // ✅ NEW LOGIC: 2-STEP SMART HUNT
+    // ✅ NEW LOGIC: RETURN TO EXACT ORIGIN (STARTING STAGE & CREATOR)
     // =========================================================================
     let final_lead_stage = new_lead_stage; 
     let final_assigned_employee = assigned_employee; 
 
-    // Fetch history going FORWARDS (oldest first - ID 1, 2, 3...)
+    // Fetch ONLY the very first log entry to find where this lead started
     const [history] = await pool.query(
-      `SELECT * FROM lead_activity_backup WHERE lead_id = ? ORDER BY id ASC`,
+      `SELECT * FROM lead_activity_backup WHERE lead_id = ? ORDER BY id ASC LIMIT 1`,
       [lead_id]
     );
 
-    let targetStage = null;
-
-    // STEP 1: Find the target stage (The first stage that is NOT Tele-Marketing)
-    for (const log of history) {
-      if (log.new_lead_stage && !log.new_lead_stage.toLowerCase().includes('tele')) {
-        targetStage = log.new_lead_stage; // e.g., 'Solutions-Team' or 'Field Marketing'
-        break; 
-      }
-    }
-
-    // STEP 2: Find the real person associated with that specific target stage
-    if (targetStage) {
-      for (const log of history) {
-        
-        // Scenario A: Did a real person receive it when it entered this stage?
-        if (log.new_lead_stage === targetStage && log.new_assigned_employee && log.new_assigned_employee !== "0") {
-          final_assigned_employee = log.new_assigned_employee;
-          final_lead_stage = targetStage;
-          break;
-        }
-        
-        // Scenario B: Did a real person move it out of this stage? 
-        if (log.old_lead_stage === targetStage && log.changed_by && log.changed_by !== "0") {
-          final_assigned_employee = log.changed_by;
-          final_lead_stage = targetStage;
-          break;
-        }
-
-        // Scenario C: Was a real person holding it when it moved?
-        if (log.old_lead_stage === targetStage && log.old_assigned_employee && log.old_assigned_employee !== "0") {
-          final_assigned_employee = log.old_assigned_employee;
-          final_lead_stage = targetStage;
-          break;
-        }
-      }
+    if (history.length > 0) {
+      const firstLog = history[0];
+      
+      // STEP 1: Set the stage to the very first stage recorded (includes Tele-Marketing)
+      final_lead_stage = firstLog.new_lead_stage || firstLog.old_lead_stage || oldLead.lead_stage;
+      
+      // STEP 2: Assign to the CREATOR instead of the assigned person.
+      // (Checks for a created_by column on the lead, falls back to the user who made the first log)
+      final_assigned_employee = oldLead.created_by || firstLog.changed_by;
     }
     // =========================================================================
 
     // ✅ Safety fallback
     if (!final_lead_stage || !final_assigned_employee || final_assigned_employee === "0") {
       return res.status(400).json({ 
-        error: "Could not determine a valid real employee to send the lead back to." 
+        error: "Could not determine the original creator to send the lead back to." 
       });
     }
 
-    // ✅ UPDATE QUERY: Changes stage, assigns to the calculated employee, forces 'follow-up'
+    // ✅ UPDATE QUERY: Changes stage, assigns to the creator, forces 'follow-up'
     await pool.query(
       `UPDATE leads 
        SET lead_stage = ?, 
@@ -807,19 +922,19 @@ export const transferLeadBackFromQuotation = async (req, res) => {
         departmentId,
         roleId,
         "lead_transferred_back",
-        reason || "Quotation generated. Lead sent back to the appropriate department."
+        reason || "Quotation generated. Lead sent back to the original creator."
       ]
     );
 
     // ✅ Success Response
     res.status(200).json({
-      message: `Lead ${lead_id} successfully sent back to ${final_lead_stage}.`,
+      message: `Lead ${lead_id} successfully sent back to creator at ${final_lead_stage}.`,
       lead_id,
       old_lead_stage: oldLead.lead_stage,
       new_lead_stage: final_lead_stage,
       assigned_employee: final_assigned_employee, 
       lead_status: "follow-up",
-      reason: reason || "Quotation generated. Lead sent back to the appropriate department."
+      reason: reason || "Quotation generated. Lead sent back to the original creator."
     });
 
   } catch (error) {

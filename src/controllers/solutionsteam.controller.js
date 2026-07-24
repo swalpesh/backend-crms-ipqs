@@ -278,16 +278,16 @@ export const updateLeadStatus = async (req, res) => {
   }
 };
 
-/* ----------------------- My Leads (Associate Employee) ------------------ */
+/* ----------------------- All Solutions Team Leads ---------------------- */
 export const listLeadsByEmployee = async (req, res) => {
   try {
-    const employeeId = req.user.employee_id;
     const { lead_status } = req.query;
 
-    let query =
-      "SELECT * FROM leads WHERE assigned_employee = ? AND lead_stage = 'Solutions-Team'";
-    const params = [employeeId];
+    // Base query: Remove 'assigned_employee = ?'
+    let query = "SELECT * FROM leads WHERE lead_stage = 'Solutions-Team'";
+    const params = [];
 
+    // Add status filter if provided
     if (lead_status) {
       if (!["new", "follow-up", "lost"].includes(lead_status)) {
         return res.status(400).json({ error: "Invalid lead_status value" });
@@ -296,8 +296,12 @@ export const listLeadsByEmployee = async (req, res) => {
       params.push(lead_status);
     }
 
+    // Sort by newest first
+    query += " ORDER BY created_at DESC";
+
     const [leads] = await pool.query(query, params);
 
+    // Fetch attachments for all leads found
     for (const lead of leads) {
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
@@ -307,13 +311,12 @@ export const listLeadsByEmployee = async (req, res) => {
     }
 
     res.status(200).json({
-      message: "Leads fetched successfully",
-      employee: employeeId,
+      message: "All Solutions-Team leads fetched successfully",
       total: leads.length,
       leads,
     });
   } catch (error) {
-    console.error("Error fetching employee leads:", error);
+    console.error("Error fetching all solutions leads:", error);
     res.status(500).json({ error: "Server error" });
   }
 };

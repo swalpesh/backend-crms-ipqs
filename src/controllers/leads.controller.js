@@ -338,36 +338,78 @@ export const revertLeadToNew = async (req, res) => {
 /* ------------------------- My Tele leads (self) ------------------------- */
 export const listLeadsByEmployee = async (req, res) => {
   try {
-    const employeeId = req.user.employee_id; // from JWT
+    const employeeId = req.user.employee_id;
     const { lead_status } = req.query;
 
-    let query = "SELECT * FROM leads WHERE created_by = ? AND lead_stage = ?";
-    const params = [employeeId, "Tele-Marketing"];
+    // ✅ Base Query: Select Lead + Join Employee Table twice (for Assigned & Creator)
+    // We use aliases 'assignee' and 'creator' to distinguish between the two joins.
+    let query = `
+      SELECT 
+        l.*,
+        CONCAT(assignee.first_name, ' ', assignee.last_name) AS assigned_employee_name,
+        assignee.username AS assigned_employee_username,
+        CONCAT(creator.first_name, ' ', creator.last_name) AS created_by_name,
+        creator.username AS created_by_username
+      FROM leads l
+      LEFT JOIN employees assignee 
+        ON l.assigned_employee COLLATE utf8mb4_unicode_ci = assignee.employee_id COLLATE utf8mb4_unicode_ci
+      LEFT JOIN employees creator 
+        ON l.created_by COLLATE utf8mb4_unicode_ci = creator.employee_id COLLATE utf8mb4_unicode_ci
+      WHERE l.assigned_employee = ? 
+      AND l.lead_stage = 'Tele-Marketing'
+    `;
 
+    const params = [employeeId];
+
+    // ✅ Filter by Lead Status (if provided)
     if (lead_status) {
-      if (!["new", "follow-up", "lost"].includes(lead_status)) {
+      if (!["new", "follow-up", "lost", "progress", "completed"].includes(lead_status)) {
         return res.status(400).json({ error: "Invalid lead_status value" });
       }
-      query += " AND lead_status = ?";
+      query += " AND l.lead_status = ?";
       params.push(lead_status);
     }
 
+    // ✅ Order by newest first
+    query += " ORDER BY l.created_at DESC";
+
     const [leads] = await pool.query(query, params);
 
+    // ✅ Calculate Counts
+    let hotLeadsCount = 0;
+
+    // ✅ Process Leads (Add Attachments & Count Hot Leads)
     for (const lead of leads) {
+      // Count if it's a hot lead (ensure boolean check works for 1/0/true/false)
+      if (lead.mark_as_hot_lead === 1 || lead.mark_as_hot_lead === true) {
+        hotLeadsCount++;
+      }
+
+      // Fetch Attachments
       const [attachments] = await pool.query(
         "SELECT id, file_name, file_path FROM lead_attachments WHERE lead_id = ?",
         [lead.lead_id]
       );
       lead.attachments = attachments;
+
+      // Fallback: If name is null (e.g., deleted employee), use username or "Unknown"
+      if (!lead.assigned_employee_name?.trim()) lead.assigned_employee_name = lead.assigned_employee_username || "Unknown";
+      if (!lead.created_by_name?.trim()) lead.created_by_name = lead.created_by_username || "Unknown";
+      
+      // Remove raw username fields to keep JSON clean (optional)
+      delete lead.assigned_employee_username;
+      delete lead.created_by_username;
     }
 
+    // ✅ Return Response
     return res.status(200).json({
       message: "Leads fetched successfully",
-      employee: employeeId,
-      total: leads.length,
-      leads
+      employee_id: employeeId,
+      total_leads: leads.length,
+      hot_leads_count: hotLeadsCount,
+      leads,
     });
+
   } catch (error) {
     console.error("Error fetching employee leads:", error);
     res.status(500).json({ error: "Server error" });
@@ -1787,3 +1829,130 @@ export const getLeadActivityByUser = async (req, res) => {
     res.status(500).json({ error: "Server error while fetching lead activity." });
   }
 };
+
+/* -------------------------------------------------------------------------- */
+/* FINALIZE LEAD: Mark as Won, clear follow-ups, and log to backup           */
+/* -------------------------------------------------------------------------- */
+export const finalizeLead = async (req, res) => {
+  const connection = await pool.getConnection();
+  
+  try {
+    const { lead_id } = req.body;
+    const { 
+      name: user_name, 
+      department: user_dept, 
+      role_id: user_role 
+    } = req.user;
+
+    if (!lead_id) {
+      return res.status(400).json({ error: "lead_id is required." });
+    }
+
+    await connection.beginTransaction();
+
+    // 1. Fetch current data for the audit log
+    const [leadRows] = await connection.query(
+      `SELECT lead_stage, assigned_employee FROM leads WHERE lead_id = ?`,
+      [lead_id]
+    );
+
+    if (leadRows.length === 0) {
+      await connection.rollback();
+      return res.status(404).json({ error: "Lead not found." });
+    }
+
+    const oldLead = leadRows[0];
+
+    // 2. Update the Leads table
+    await connection.query(
+      `UPDATE leads 
+       SET po_confirmed = 'Yes',
+           assigned_employee = '0',
+           lead_status = 'new',
+           follow_up_reason = NULL,
+           follow_up_date = NULL,
+           follow_up_time = NULL,
+           lead_stage = 'Won',
+           updated_at = NOW()
+       WHERE lead_id = ?`,
+      [lead_id]
+    );
+
+    // 3. Log to lead_activity_backup
+    await connection.query(
+      `INSERT INTO lead_activity_backup (
+        lead_id, old_lead_stage, new_lead_stage, old_assigned_employee, new_assigned_employee,
+        changed_by, changed_by_department, changed_by_role, change_type, reason
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [
+        lead_id,
+        oldLead.lead_stage,
+        'Won',
+        oldLead.assigned_employee,
+        '0',
+        user_name || '-',
+        user_dept || '-',
+        user_role || '-',
+        'LEAD_FINALIZED',
+        'Lead marked as Won.'
+      ]
+    );
+
+    await connection.commit();
+    res.status(200).json({ success: true, message: "Lead successfully finalized as Won." });
+
+  } catch (error) {
+    await connection.rollback();
+    console.error("Finalize Lead Error:", error);
+    res.status(500).json({ error: "Internal Server Error" });
+  } finally {
+    connection.release();
+  }
+};
+
+/* -------------------------------------------------------------------------- */
+/* GET FOLLOW-UP HISTORY FOR A SPECIFIC LEAD                                  */
+/* -------------------------------------------------------------------------- */
+export const getFollowUpHistory = async (req, res) => {
+  try {
+    // Extract lead_id from the URL parameters
+    const { lead_id } = req.params;
+
+    if (!lead_id) {
+      return res.status(400).json({ error: "lead_id is required in the URL." });
+    }
+
+    // Fetch the history, ordering by newest first
+    const [history] = await pool.query(
+      `SELECT 
+        id, 
+        lead_id, 
+        previous_followup_date, 
+        previous_followup_time, 
+        previous_followup_reason, 
+        updated_by_emp_id, 
+        new_followup_date, 
+        new_followup_time, 
+        new_followup_reason, 
+        department_name, 
+        created_at 
+       FROM followup_history 
+       WHERE lead_id = ? 
+       ORDER BY created_at DESC`,
+      [lead_id]
+    );
+
+    // Return the response
+    return res.status(200).json({
+      message: "Follow-up history fetched successfully.",
+      lead_id: lead_id,
+      total_records: history.length,
+      data: history
+    });
+
+  } catch (error) {
+    console.error("Error fetching follow-up history:", error);
+    return res.status(500).json({ error: "Internal Server Error while fetching follow-up history." });
+  }
+};
+

@@ -29,7 +29,7 @@ import {
   getConfirmedRevenueAnalytics,
   deleteMultipleLeads,
   getFollowUpLeadsForAdmin,
-  getLeadActivityByUser
+  getLeadActivityByUser,finalizeLead, getFollowUpHistory
 } from "../controllers/leads.controller.js";
 
 
@@ -60,6 +60,7 @@ router.post(
   createLead
 );
 
+
 router.get(
   "/",
   requireAuth,
@@ -83,6 +84,8 @@ router.patch(
   requireRole(["Tele-Marketing-Head", "Tele-Marketing-Employee","IpqsHead"]),
   revertLeadToNew
 );
+
+router.get("/:lead_id/followups", getFollowUpHistory);
 
 router.get(
   "/my-leads",
@@ -121,6 +124,7 @@ router.patch(
 
 router.put("/quotation-created", requireAuth, updateQuotationCreatedStatus);
 router.put("/po-status", requireAuth, updatePoConfirmedStatus);
+router.patch("/finalize", requireAuth, finalizeLead);
 
 router.get("/admin/follow-up", requireAuth, getFollowUpLeadsForAdmin);
 
